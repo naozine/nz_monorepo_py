@@ -3,9 +3,10 @@ import re
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from pathlib import Path
 
 # 1) 読み込み
-df = pd.read_excel("survey.xlsx", engine="openpyxl")
+df = pd.read_excel(Path(__file__).parent / "survey.xlsx", engine="openpyxl")
 
 # 2) 「回答」列を直前の設問列に対応付けてリネーム
 # - 原則: 「回答」という列名（重複含む）は、その左の列名 + "_回答" にする
@@ -66,6 +67,15 @@ def grade_ja_on_april1(birth_dt):
     return mapping.get(a, "対象外")
 
 df["grade_2024"] = df["birth_dt"].apply(grade_ja_on_april1)
+
+# 未就学児（2024/04/01時点で6歳未満）を除外するための年齢計算とフィルタ
+# age_onはNaNを返すことがあるため、いったん列にしてから判定
+df["age_2024"] = df["birth_dt"].apply(lambda d: age_on(d, APRIL1))
+preschool_mask = df["age_2024"].notna() & (df["age_2024"] < 6)
+# 除外数（「組」=1行1組想定）
+n_preschool = int(preschool_mask.sum())
+# 集計に用いる有効データ
+df_eff = df.loc[~preschool_mask].copy()
 
 # 6) 地域区分（東京23区 / 三多摩島しょ / 埼玉 / 神奈川 / 千葉 / その他）
 TOKYO_23 = {
@@ -137,10 +147,10 @@ def normalize_gender(x: str) -> str:
     return "未回答・その他"
 
 # 性別の正規化
-if "性別" in df.columns:
-    df["gender_norm"] = df["性別"].apply(normalize_gender)
+if "性別" in df_eff.columns:
+    df_eff["gender_norm"] = df_eff["性別"].apply(normalize_gender)
 else:
-    df["gender_norm"] = "未回答・その他"
+    df_eff["gender_norm"] = "未回答・その他"
 
 # 小学校/中学校の区分（grade_2024が小x/中xで判定）
 def school_level_from_grade(g: str) -> str:
@@ -153,13 +163,13 @@ def school_level_from_grade(g: str) -> str:
         return "中学校"
     return "不明"
 
-df["school_level"] = df["grade_2024"].apply(school_level_from_grade)
+df_eff["school_level"] = df_eff["grade_2024"].apply(school_level_from_grade)
 
-# 集計
-n_total = len(df)
+# 集計（未就学児を除いた有効データに対して）
+n_total = len(df_eff)
 
 # 性別
-gender_counts = df["gender_norm"].value_counts().to_dict()
+gender_counts = df_eff["gender_norm"].value_counts().to_dict()
 male = int(gender_counts.get("男性", 0))
 female = int(gender_counts.get("女性", 0))
 other = int(gender_counts.get("未回答・その他", 0))
@@ -168,7 +178,7 @@ def pct(n, d):
     return 0 if d == 0 else round(n * 100.0 / d, 1)
 
 # 学校区分
-level_counts = df["school_level"].value_counts().to_dict()
+level_counts = df_eff["school_level"].value_counts().to_dict()
 prim = int(level_counts.get("小学校", 0))
 mid = int(level_counts.get("中学校", 0))
 unknown_lv = int(level_counts.get("不明", 0))
@@ -185,6 +195,9 @@ a4_css = f"""
   .page {{ max-width: 180mm; margin: 0 auto; background: white; }}
   h1 {{ font-size: 20pt; margin: 0 0 8mm; }}
   h2 {{ font-size: 14pt; margin: 6mm 0 3mm; border-bottom: 2px solid #eee; padding-bottom: 2mm; }}
+  .title {{ margin: 0 0 6mm; }}
+  .title .line1 {{ font-size: 10pt; color: #555; }}
+  .title .line2 {{ font-size: 22pt; font-weight: 800; margin-top: 1mm; }}
   .muted {{ color: #777; font-size: 9pt; }}
   .kpis {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 8mm; margin-bottom: 6mm; }}
   .kpi {{ border: 1px solid #e5e5e5; border-radius: 6px; padding: 6mm; }}
@@ -241,7 +254,11 @@ html = f"""
 <body>
   <div class=\"page\">
     <header>
-      <h1>サマリレポート（A4縦）</h1>
+      <div class="title">
+        <div class="line1">東京私立中学高等学校協会 主催</div>
+        <div class="line2">2024東京都私立学校展(進学相談会)</div>
+      </div>
+      <div class=\"muted\">未就学児{n_preschool:,}組を除く</div>
       <div class=\"muted\">作成日時: {now_str}</div>
     </header>
 
@@ -298,4 +315,4 @@ html = f"""
 with open("report.html", "w", encoding="utf-8") as f:
     f.write(html)
 
-print(f"HTMLレポートを出力しました: report.html  （{n_total}件）")
+print(f"HTMLレポートを出力しました: report.html  （{n_total}件、未就学児{n_preschool}組を除く）")
