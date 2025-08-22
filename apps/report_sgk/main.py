@@ -177,10 +177,12 @@ unknown_lv = int(level_counts.get("不明", 0))
 now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
 a4_css = f"""
-  @page {{ size: A4 portrait; margin: 15mm; }}
-  html, body {{ height: 100%; }}
+  @page {{ size: A4 portrait; }}  /* 余白はChromeデフォルトを使うためmargin指定はしない */
+  /* html, body の固定高さは印刷でオーバーフローを誘発するため外す */
+  html, body {{ /* height: 100%; 削除 */ }}
   body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif; color: #222; }}
-  .page {{ width: 210mm; min-height: 297mm; margin: 0 auto; background: white; }}
+  /* A4の印字可能領域に収まるよう安全側の最大幅に。min-heightも外す */
+  .page {{ max-width: 180mm; margin: 0 auto; background: white; }}
   h1 {{ font-size: 20pt; margin: 0 0 8mm; }}
   h2 {{ font-size: 14pt; margin: 6mm 0 3mm; border-bottom: 2px solid #eee; padding-bottom: 2mm; }}
   .muted {{ color: #777; font-size: 9pt; }}
@@ -204,6 +206,12 @@ a4_css = f"""
   /* Ensure colors are preserved when printing */
   @media print {{
     * {{ -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }}
+    /* 印刷時も高さ固定を避ける */
+    html, body {{ height: auto !important; }}
+    .page {{ max-width: 180mm; min-height: auto; }}
+    /* 末尾の余白で2ページ目に回り込まないように */
+    .page > :last-child {{ margin-bottom: 0 !important; padding-bottom: 0 !important; }}
+
     .bar {{ background: #f2f4f8 !important; border-color: #d0d7e2 !important; }}
     .bar > span {{ background: #4c8bf5 !important; }}
     .bar.secondary > span {{ background: #f58b4c !important; }}
