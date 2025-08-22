@@ -294,6 +294,10 @@ a4_css = f"""
     break-before: page;
     page-break-before: always; /* Fallback for older engines */
   }}
+
+  /* 設問セクション用 部品 */
+  .supplement {{ font-size: 10pt; color: #555; margin: 2mm 0 2mm; white-space: pre-wrap; }}
+  .note-box {{ display: inline-block; padding: 3mm 5mm; border: 1px solid #e0e6ef; background: #f7f9fc; border-radius: 8px; font-size: 10.5pt; color: #333; }}
 """
 
 male_pct = pct(male, n_total)
@@ -343,15 +347,48 @@ for q in question_columns:
     print(f"- {q}")
 
 # 設問ごとの章（改ページあり）のHTMLを生成
-question_sections_html = "\n".join([
-    f"""
+
+def first_non_empty_value(series: pd.Series):
+    if series is None:
+        return None
+    for v in series:
+        if pd.isna(v):
+            continue
+        s = str(v).strip()
+        if s:
+            return s
+    return None
+
+def escape_html(s: str) -> str:
+    # 最低限のエスケープ（選択肢や補足に <, >, & が含まれる場合に備える）
+    return (
+        str(s)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+sections = []
+for idx, q in enumerate(question_columns):
+    # 補足説明列が存在すれば、最初の非空データを拾って表示
+    supp_col = f"補足説明{q}"
+    supp_html = ""
+    if supp_col in df.columns:
+        first_val = first_non_empty_value(df[supp_col])
+        if first_val is not None:
+            supp_html = f"<div class=\"supplement\">{escape_html(first_val)}</div>"
+
+    section_html = f"""
     <section class=\"page-break\">
       <h2>Q{idx+1} {q}</h2>
+      {supp_html}
+      <div class=\"note-box\">選択肢</div>
       <p>この設問の集計は準備中です。（ダミー）</p>
     </section>
     """.strip()
-    for idx, q in enumerate(question_columns)
-])
+    sections.append(section_html)
+
+question_sections_html = "\n".join(sections)
 
 html = f"""
 <!doctype html>
