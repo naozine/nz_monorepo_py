@@ -404,6 +404,25 @@ def escape_html(s: str) -> str:
         .replace(">", "&gt;")
     )
 
+# 補足説明の前処理（HTML埋め込み用）
+# 仕様:
+# - 入力テキストをまず escape_html で安全にエスケープ
+# - その後、全角の開き括弧「（」の直前に <span style="white-space: nowrap;"> を付与
+# - 全角の閉じ括弧「）」の直後に </span> を付与
+# 備考:
+# - 「（」「）」の数が一致しない場合、span が不均衡になる可能性がありますが、仕様通り付与します。
+# - この関数は安全な HTML 文字列を返すため、呼び出し側で追加のエスケープは不要です。
+
+def preprocess_supplement_html(raw: str) -> str:
+    if raw is None:
+        return ""
+    escaped = escape_html(raw)
+    # 「（」の前にノーブレーク用 span 開始タグを置く（文字自体は保持）
+    escaped = escaped.replace("（", "<span style=\"white-space: nowrap;\">（")
+    # 「）」の後に span の終了タグを置く
+    escaped = escaped.replace("）", "）</span>")
+    return escaped
+
 sections = []
 for idx, q in enumerate(question_columns):
     # 補足説明列が存在すれば、最初の非空データを拾って表示（角丸矩形の中に配置）
@@ -412,7 +431,7 @@ for idx, q in enumerate(question_columns):
     if supp_col in df.columns:
         first_val = first_non_empty_value(df[supp_col])
         if first_val is not None:
-            inner_sup = f"<h3 class=\"supplement\">{escape_html(first_val)}</h3>"
+            inner_sup = f"<h3 class=\"supplement\">{preprocess_supplement_html(first_val)}</h3>"
 
     # 設問の選択肢（ユニーク）を取得して列挙
     opts = get_question_options(df, q)
