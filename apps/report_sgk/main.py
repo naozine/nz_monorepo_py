@@ -99,7 +99,7 @@ def region_bucket(pref, city):
     if pref == "千葉県": return "千葉県"
     return "その他"
 
-df["region_bucket"] = [region_bucket(p, c) for p, c in zip(df.get("都道府県"), df.get("市区町村"))]
+df_eff["region_bucket"] = [region_bucket(p, c) for p, c in zip(df_eff.get("都道府県"), df_eff.get("市区町村"))]
 
 # 7) 複数回答の縦持ち化（例: 情報経路・習い事）
 def split_multiselect(series: pd.Series) -> pd.Series:
@@ -114,11 +114,11 @@ def split_multiselect(series: pd.Series) -> pd.Series:
 col_channel = "本イベントを何でお知りになりましたか？（複数回答可）"
 col_learning = "現在習い事や塾などに通われていますか？（複数回答可）"
 
-df["channel_list"] = split_multiselect(df.get(col_channel))
-df["learning_list"] = split_multiselect(df.get(col_learning))
+df_eff["channel_list"] = split_multiselect(df_eff.get(col_channel))
+df_eff["learning_list"] = split_multiselect(df_eff.get(col_learning))
 
 channel_long = (
-    df[["性別", "region_bucket", "grade_2024", "channel_list"]]
+    df_eff[["性別", "region_bucket", "grade_2024", "channel_list"]]
     .explode("channel_list", ignore_index=True)
     .rename(columns={"channel_list": "channel"})
 )
