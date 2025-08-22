@@ -274,8 +274,24 @@ grand_total = int(ct.values.sum())
 # 各行の割合（総数に対する％）
 row_pct = row_totals.apply(lambda n: pct(int(n), grand_total)) if grand_total else row_totals.apply(lambda n: 0)
 
+# 地域別 × 学校区分（小学校/中学校）クロス集計
+region_rows_order = ["東京23区", "三多摩島しょ", "埼玉県", "神奈川県", "千葉県", "その他"]
+region_ct = pd.crosstab(df_eff["region_bucket"], df_eff["school_level"])
+region_ct = region_ct.reindex(index=region_rows_order, columns=cols_order, fill_value=0)
+region_row_totals = region_ct.sum(axis=1)
+region_col_totals = region_ct.sum(axis=0)
+# 行割合（総数に対する％）
+region_row_pct = region_row_totals.apply(lambda n: pct(int(n), grand_total)) if grand_total else region_row_totals.apply(lambda n: 0)
+
+# 数値のフォーマット
 def fmt_int(n: int) -> str:
     return f"{int(n):,}"
+
+# 地域別HTML行生成
+region_rows_html = "\n".join([
+    f"          <tr>\n            <td class=\"label\">{label}</td>\n            <td>{fmt_int(region_ct.loc[label, '小学校'])}</td>\n            <td>{fmt_int(region_ct.loc[label, '中学校'])}</td>\n            <td>{fmt_int(region_row_totals.loc[label])}</td>\n            <td>{region_row_pct.loc[label]}%</td>\n          </tr>"
+    for label in region_rows_order
+])
 
 html = f"""
 <!doctype html>
@@ -345,6 +361,31 @@ html = f"""
             <td class="label">合計</td>
             <td>{fmt_int(col_totals.loc['小学校'])}</td>
             <td>{fmt_int(col_totals.loc['中学校'])}</td>
+            <td>{fmt_int(grand_total)}</td>
+            <td>100%</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <h3>地域別</h3>
+      <table class="simple">
+        <thead>
+          <tr>
+            <th></th>
+            <th>小学校</th>
+            <th>中学校</th>
+            <th>合計</th>
+            <th>割合</th>
+          </tr>
+        </thead>
+        <tbody>
+{region_rows_html}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td class="label">合計</td>
+            <td>{fmt_int(region_col_totals.loc['小学校'])}</td>
+            <td>{fmt_int(region_col_totals.loc['中学校'])}</td>
             <td>{fmt_int(grand_total)}</td>
             <td>100%</td>
           </tr>
