@@ -297,8 +297,7 @@ a4_css = f"""
 
   /* 設問セクション用 部品 */
   .supplement {{ font-size: 10pt; color: #555; margin: 2mm 0 2mm; white-space: pre-wrap; }}
-  .note-box {{ display: inline-block; padding: 3mm 5mm; border: 1px solid #e0e6ef; background: #f7f9fc; border-radius: 8px; font-size: 12pt; color: #333; }}
-  .note-box .supplement {{ font-size: inherit; color: #555; margin: 0 0 2mm; white-space: pre-wrap; }}
+  .note-box {{ display: inline-block; padding: 3mm 5mm; border: 1px solid #e0e6ef; background: #f7f9fc; border-radius: 8px; }}
 """
 
 male_pct = pct(male, n_total)
@@ -377,9 +376,9 @@ for idx, q in enumerate(question_columns):
     if supp_col in df.columns:
         first_val = first_non_empty_value(df[supp_col])
         if first_val is not None:
-            inner_sup = f"<div class=\"supplement\">{escape_html(first_val)}</div>"
+            inner_sup = f"<h3 class=\"supplement\">{escape_html(first_val)}</h3>"
 
-    note_box_html = f"<div class=\"note-box\">{inner_sup}<div>選択肢</div></div>"
+    note_box_html = f"<div class=\"note-box\">{inner_sup}<h3>選択肢</h3></div>"
 
     section_html = f"""
     <section class=\"page-break\">
