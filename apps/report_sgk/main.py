@@ -124,5 +124,170 @@ channel_by_grade = (
     [ [g for g in grades_order if g in channel_long["grade_2024"].unique()] ]
 )
 
-# 9) 可視化（必要に応じて）
-# 例: channel_by_region.plot.barh(stacked=True), 等
+# 9) HTMLレポート（A4縦）出力 — サマリ（回答人数／男女比／小学校・中学校比）
+
+def normalize_gender(x: str) -> str:
+    if pd.isna(x) or str(x).strip() == "":
+        return "未回答・その他"
+    s = str(x)
+    if "男" in s:
+        return "男性"
+    if "女" in s:
+        return "女性"
+    return "未回答・その他"
+
+# 性別の正規化
+if "性別" in df.columns:
+    df["gender_norm"] = df["性別"].apply(normalize_gender)
+else:
+    df["gender_norm"] = "未回答・その他"
+
+# 小学校/中学校の区分（grade_2024が小x/中xで判定）
+def school_level_from_grade(g: str) -> str:
+    if pd.isna(g):
+        return "不明"
+    g = str(g)
+    if g.startswith("小"):
+        return "小学校"
+    if g.startswith("中"):
+        return "中学校"
+    return "不明"
+
+df["school_level"] = df["grade_2024"].apply(school_level_from_grade)
+
+# 集計
+n_total = len(df)
+
+# 性別
+gender_counts = df["gender_norm"].value_counts().to_dict()
+male = int(gender_counts.get("男性", 0))
+female = int(gender_counts.get("女性", 0))
+other = int(gender_counts.get("未回答・その他", 0))
+
+def pct(n, d):
+    return 0 if d == 0 else round(n * 100.0 / d, 1)
+
+# 学校区分
+level_counts = df["school_level"].value_counts().to_dict()
+prim = int(level_counts.get("小学校", 0))
+mid = int(level_counts.get("中学校", 0))
+unknown_lv = int(level_counts.get("不明", 0))
+
+# HTML生成
+now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+a4_css = f"""
+  @page {{ size: A4 portrait; margin: 15mm; }}
+  html, body {{ height: 100%; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif; color: #222; }}
+  .page {{ width: 210mm; min-height: 297mm; margin: 0 auto; background: white; }}
+  h1 {{ font-size: 20pt; margin: 0 0 8mm; }}
+  h2 {{ font-size: 14pt; margin: 6mm 0 3mm; border-bottom: 2px solid #eee; padding-bottom: 2mm; }}
+  .muted {{ color: #777; font-size: 9pt; }}
+  .kpis {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 8mm; margin-bottom: 6mm; }}
+  .kpi {{ border: 1px solid #e5e5e5; border-radius: 6px; padding: 6mm; }}
+  .kpi .label {{ font-size: 10pt; color: #666; }}
+  .kpi .value {{ font-size: 24pt; font-weight: 700; margin-top: 2mm; }}
+  .bars {{ display: grid; grid-template-columns: 1fr; gap: 3mm; margin-top: 4mm; }}
+  /* Visible track even when backgrounds are not printed */
+  .bar {{ background: #f2f4f8; border: 1px solid #d0d7e2; border-radius: 999px; overflow: hidden; height: 10px; position: relative; }}
+  /* Fill segment */
+  .bar > span {{ display: block; height: 100%; background: #4c8bf5; }}
+  .bar.secondary > span {{ background: #f58b4c; }}
+  .bar.other > span {{ background: #b5b5b5; }}
+  .legend {{ display: flex; gap: 6mm; flex-wrap: wrap; margin-top: 2mm; font-size: 9pt; color: #555; }}
+  .legend .item::before {{ content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }}
+  .legend .male::before {{ background: #4c8bf5; }}
+  .legend .female::before {{ background: #f58b4c; }}
+  .legend .other::before {{ background: #b5b5b5; }}
+
+  /* Ensure colors are preserved when printing */
+  @media print {{
+    * {{ -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }}
+    .bar {{ background: #f2f4f8 !important; border-color: #d0d7e2 !important; }}
+    .bar > span {{ background: #4c8bf5 !important; }}
+    .bar.secondary > span {{ background: #f58b4c !important; }}
+    .bar.other > span {{ background: #b5b5b5 !important; }}
+  }}
+"""
+
+male_pct = pct(male, n_total)
+female_pct = pct(female, n_total)
+other_pct = pct(other, n_total)
+
+prim_pct = pct(prim, n_total)
+mid_pct = pct(mid, n_total)
+unknown_lv_pct = pct(unknown_lv, n_total)
+
+html = f"""
+<!doctype html>
+<html lang=\"ja\">
+<head>
+  <meta charset=\"utf-8\" />
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+  <title>サマリレポート</title>
+  <style>
+  {a4_css}
+  </style>
+</head>
+<body>
+  <div class=\"page\">
+    <header>
+      <h1>サマリレポート（A4縦）</h1>
+      <div class=\"muted\">作成日時: {now_str}</div>
+    </header>
+
+    <section>
+      <h2>回答人数</h2>
+      <div class=\"kpis\">
+        <div class=\"kpi\">
+          <div class=\"label\">総回答数</div>
+          <div class=\"value\">{n_total:,} 名</div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>男女比</h2>
+      <div class=\"kpi\">
+        <div class=\"label\">男性 / 女性 / その他・未回答</div>
+        <div class=\"bars\">
+          <div class=\"bar\"><span style=\"width:{male_pct}%;\"></span></div>
+          <div class=\"bar secondary\"><span style=\"width:{female_pct}%;\"></span></div>
+          <div class=\"bar other\"><span style=\"width:{other_pct}%;\"></span></div>
+        </div>
+        <div class=\"legend\">
+          <div class=\"item male\">男性: {male:,} 名（{male_pct}%）</div>
+          <div class=\"item female\">女性: {female:,} 名（{female_pct}%）</div>
+          <div class=\"item other\">その他・未回答: {other:,} 名（{other_pct}%）</div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>小学校・中学校 比</h2>
+      <div class=\"kpi\">
+        <div class=\"label\">小学校 / 中学校 / 不明</div>
+        <div class=\"bars\">
+          <div class=\"bar\"><span style=\"width:{prim_pct}%;\"></span></div>
+          <div class=\"bar secondary\"><span style=\"width:{mid_pct}%;\"></span></div>
+          <div class=\"bar other\"><span style=\"width:{unknown_lv_pct}%;\"></span></div>
+        </div>
+        <div class=\"legend\">
+          <div class=\"item male\">小学校: {prim:,} 名（{prim_pct}%）</div>
+          <div class=\"item female\">中学校: {mid:,} 名（{mid_pct}%）</div>
+          <div class=\"item other\">不明: {unknown_lv:,} 名（{unknown_lv_pct}%）</div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>
+"""
+
+# 保存
+with open("report.html", "w", encoding="utf-8") as f:
+    f.write(html)
+
+print(f"HTMLレポートを出力しました: report.html  （{n_total}件）")
