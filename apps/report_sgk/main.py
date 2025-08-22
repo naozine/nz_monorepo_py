@@ -236,19 +236,19 @@ a4_css = f"""
   body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif; color: #222; }}
   /* A4の印字可能領域に収まるよう安全側の最大幅に。min-heightも外す */
   .page {{ max-width: 180mm; margin: 0 auto; background: white; }}
-  h1 {{ font-size: 20pt; margin: 0 0 8mm; }}
-  h2 {{ font-size: 14pt; margin: 6mm 0 3mm; border-bottom: 2px solid #eee; padding-bottom: 2mm; }}
+  h1 {{ font-size: 18pt; margin: 0 0 8mm; }}
+  h2 {{ font-size: 13pt; margin: 6mm 0 3mm; border-bottom: 2px solid #eee; padding-bottom: 2mm; }}
   /* 章内の項目インデント */
   section > *:not(h2) {{ margin-left: 6mm; }}
-  h3 {{ font-size: 12pt; margin: 3mm 0 2mm; }}
+  h3 {{ font-size: 11pt; margin: 3mm 0 2mm; }}
   .title {{ margin: 0 0 6mm; }}
-  .title .line1 {{ font-size: 10pt; color: #555; }}
-  .title .line2 {{ font-size: 22pt; font-weight: 800; margin-top: 1mm; }}
-  .muted {{ color: #777; font-size: 9pt; }}
+  .title .line1 {{ font-size: 9pt; color: #555; }}
+  .title .line2 {{ font-size: 20pt; font-weight: 800; margin-top: 1mm; }}
+  .muted {{ color: #777; font-size: 8pt; }}
   .kpis {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 8mm; margin-bottom: 6mm; }}
   .kpi {{ border: 1px solid #e5e5e5; border-radius: 6px; padding: 6mm; }}
-  .kpi .label {{ font-size: 10pt; color: #666; }}
-  .kpi .value {{ font-size: 24pt; font-weight: 700; margin-top: 2mm; }}
+  .kpi .label {{ font-size: 9pt; color: #666; }}
+  .kpi .value {{ font-size: 22pt; font-weight: 700; margin-top: 2mm; }}
   .bars {{ display: grid; grid-template-columns: 1fr; gap: 3mm; margin-top: 4mm; }}
   /* Visible track even when backgrounds are not printed */
   .bar {{ background: #f2f4f8; border: 1px solid #d0d7e2; border-radius: 999px; overflow: hidden; height: 10px; position: relative; }}
@@ -256,21 +256,21 @@ a4_css = f"""
   .bar > span {{ display: block; height: 100%; background: #4c8bf5; }}
   .bar.secondary > span {{ background: #f58b4c; }}
   .bar.other > span {{ background: #b5b5b5; }}
-  .legend {{ display: flex; gap: 6mm; flex-wrap: wrap; margin-top: 2mm; font-size: 9pt; color: #555; }}
+  .legend {{ display: flex; gap: 6mm; flex-wrap: wrap; margin-top: 2mm; font-size: 8pt; color: #555; }}
   .legend .item::before {{ content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }}
   .legend .male::before {{ background: #4c8bf5; }}
   .legend .female::before {{ background: #f58b4c; }}
   .legend .other::before {{ background: #b5b5b5; }}
 
   /* テーブル */
-  table.simple {{ border-collapse: collapse; width: 100%; font-size: 10.5pt; }}
+  table.simple {{ border-collapse: collapse; width: 100%; font-size: 10pt; }}
   table.simple th, table.simple td {{ border: 1px solid #e0e0e0; padding: 6px 8px; text-align: right; }}
   table.simple th {{ background: #f9fafb; color: #444; text-align: center; }}
   table.simple tfoot td {{ font-weight: 700; background: #fafafa; }}
   table.simple td.label {{ text-align: left; }}
 
   /* 概要レイアウト */
-  .overview-list {{ display: grid; grid-template-columns: 38mm 1fr; column-gap: 6mm; row-gap: 2mm; font-size: 11pt; }}
+  .overview-list {{ display: grid; grid-template-columns: 38mm 1fr; column-gap: 6mm; row-gap: 2mm; font-size: 10pt; }}
   .overview-list .label {{ color: #555; }}
   .overview-list .value {{ font-weight: 600; }}
 
