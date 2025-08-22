@@ -8,23 +8,34 @@ from pathlib import Path
 # 1) 読み込み
 df = pd.read_excel(Path(__file__).parent / "survey.xlsx", engine="openpyxl")
 
-# 2) 「回答」列を直前の設問列に対応付けてリネーム
-# - 原則: 「回答」という列名（重複含む）は、その左の列名 + "_回答" にする
-# - 左の列（設問列）の各行の値は補足情報で全行同じ → 列名としての設問タイトルを使う
+# 2) 「回答」列の例外的な処理（仕様変更後）
+# 仕様：
+# - 「回答」列（重複名: 回答, 回答.1 など）の左の列名を "元の設問名" とする
+# - 左の列（設問列）の列名を "補足説明" + 元の設問名 に変更
+# - 「回答」列の列名を 元の設問名 に変更（＝実データは直感的な設問名で参照できる）
+# - 先頭列が「回答」の場合は左が存在しないため、そのままにする
+# 実装ノート：
+# - 元の列順（cols）から新しい列名リスト（new_names）を構成して一括 rename することで副作用を防ぐ
+# - 他の列はそのまま
+
 def map_answer_columns(frame: pd.DataFrame) -> pd.DataFrame:
     cols = list(frame.columns)
-    new_cols = {}
+    new_names = list(cols)  # 初期は同名
+
     for i, c in enumerate(cols):
         if c == "回答" or re.match(r"^回答\.\d+$", str(c)):
             if i == 0:
-                # 念のため: 先頭が回答ならそのまま
-                new_cols[c] = c
-            else:
-                q_col_name = cols[i - 1]
-                new_cols[c] = f"{q_col_name}_回答"
-        else:
-            new_cols[c] = c
-    return frame.rename(columns=new_cols)
+                # 先頭が回答なら変更不可、スキップ
+                continue
+            original_left = cols[i - 1]
+            # 左列は補足説明プレフィックスを付ける
+            new_names[i - 1] = f"補足説明{original_left}"
+            # 回答列は左列の元名にする
+            new_names[i] = original_left
+
+    # 重複名が発生する可能性はあるが仕様上許容する（必要なら後段で個別対応）
+    rename_map = {old: new for old, new in zip(cols, new_names) if old != new}
+    return frame.rename(columns=rename_map)
 
 df = map_answer_columns(df)
 
