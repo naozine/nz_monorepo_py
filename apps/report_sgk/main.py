@@ -288,6 +288,12 @@ a4_css = f"""
     .bar.secondary > span {{ background: #f58b4c !important; }}
     .bar.other > span {{ background: #b5b5b5 !important; }}
   }}
+
+  /* セクション改ページ */
+  section.page-break {{
+    break-before: page;
+    page-break-before: always; /* Fallback for older engines */
+  }}
 """
 
 male_pct = pct(male, n_total)
@@ -335,6 +341,17 @@ question_columns = get_question_columns(df)
 print("設問一覧（候補）:")
 for q in question_columns:
     print(f"- {q}")
+
+# 設問ごとの章（改ページあり）のHTMLを生成
+question_sections_html = "\n".join([
+    f"""
+    <section class=\"page-break\">
+      <h2>Q{idx+1} {q}</h2>
+      <p>この設問の集計は準備中です。（ダミー）</p>
+    </section>
+    """.strip()
+    for idx, q in enumerate(question_columns)
+])
 
 html = f"""
 <!doctype html>
@@ -435,6 +452,8 @@ html = f"""
         </tfoot>
       </table>
     </section>
+
+    {question_sections_html}
 
   </div>
 </body>
