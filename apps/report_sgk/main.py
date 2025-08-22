@@ -201,6 +201,9 @@ a4_css = f"""
   .page {{ max-width: 180mm; margin: 0 auto; background: white; }}
   h1 {{ font-size: 20pt; margin: 0 0 8mm; }}
   h2 {{ font-size: 14pt; margin: 6mm 0 3mm; border-bottom: 2px solid #eee; padding-bottom: 2mm; }}
+  /* 章内の項目インデント */
+  section > *:not(h2) {{ margin-left: 6mm; }}
+  h3 {{ font-size: 12pt; margin: 3mm 0 2mm; }}
   .title {{ margin: 0 0 6mm; }}
   .title .line1 {{ font-size: 10pt; color: #555; }}
   .title .line2 {{ font-size: 22pt; font-weight: 800; margin-top: 1mm; }}
@@ -221,6 +224,13 @@ a4_css = f"""
   .legend .male::before {{ background: #4c8bf5; }}
   .legend .female::before {{ background: #f58b4c; }}
   .legend .other::before {{ background: #b5b5b5; }}
+
+  /* テーブル */
+  table.simple {{ border-collapse: collapse; width: 100%; font-size: 10.5pt; }}
+  table.simple th, table.simple td {{ border: 1px solid #e0e0e0; padding: 6px 8px; text-align: right; }}
+  table.simple th {{ background: #f9fafb; color: #444; text-align: center; }}
+  table.simple tfoot td {{ font-weight: 700; background: #fafafa; }}
+  table.simple td.label {{ text-align: left; }}
 
   /* 概要レイアウト */
   .overview-list {{ display: grid; grid-template-columns: 38mm 1fr; column-gap: 6mm; row-gap: 2mm; font-size: 11pt; }}
@@ -250,6 +260,19 @@ other_pct = pct(other, n_total)
 prim_pct = pct(prim, n_total)
 mid_pct = pct(mid, n_total)
 unknown_lv_pct = pct(unknown_lv, n_total)
+
+# 男女 × 学校区分（小学校/中学校）クロス集計（未就学児除外データで）
+rows_order = ["男性", "女性"]
+cols_order = ["小学校", "中学校"]
+ct = pd.crosstab(df_eff["gender_norm"], df_eff["school_level"])
+ct = ct.reindex(index=rows_order, columns=cols_order, fill_value=0)
+# 合計
+row_totals = ct.sum(axis=1)
+col_totals = ct.sum(axis=0)
+grand_total = int(ct.values.sum())
+
+def fmt_int(n: int) -> str:
+    return f"{int(n):,}"
 
 html = f"""
 <!doctype html>
@@ -283,6 +306,43 @@ html = f"""
         <div class=\"label\">アンケート回答数</div>
         <div class=\"value\">{n_total:,}組（未就学児{n_preschool:,}組を除く）</div>
       </div>
+    </section>
+
+    <section>
+      <h2>回答者属性</h2>
+      <h3>男女×学校区分 クロス集計</h3>
+      <table class="simple">
+        <thead>
+          <tr>
+            <th></th>
+            <th>小学校</th>
+            <th>中学校</th>
+            <th>合計</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="label">男性</td>
+            <td>{fmt_int(ct.loc['男性','小学校'])}</td>
+            <td>{fmt_int(ct.loc['男性','中学校'])}</td>
+            <td>{fmt_int(row_totals.loc['男性'])}</td>
+          </tr>
+          <tr>
+            <td class="label">女性</td>
+            <td>{fmt_int(ct.loc['女性','小学校'])}</td>
+            <td>{fmt_int(ct.loc['女性','中学校'])}</td>
+            <td>{fmt_int(row_totals.loc['女性'])}</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td class="label">合計</td>
+            <td>{fmt_int(col_totals.loc['小学校'])}</td>
+            <td>{fmt_int(col_totals.loc['中学校'])}</td>
+            <td>{fmt_int(grand_total)}</td>
+          </tr>
+        </tfoot>
+      </table>
     </section>
 
     <section>
