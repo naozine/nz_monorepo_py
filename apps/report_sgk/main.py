@@ -330,7 +330,10 @@ a4_css = f"""
 
   /* 設問セクション用 部品 */
   .supplement {{ font-size: 10pt; color: #555; margin: 2mm 0 2mm; white-space: pre-wrap; }}
-  .note-box {{ display: inline-block; padding: 3mm 5mm; border: 1px solid #e0e6ef; background: #f7f9fc; border-radius: 8px; }}
+  .note-box {{ display: block; max-width: 100%; padding: 3mm 5mm; border: 1px solid #e0e6ef; background: #f7f9fc; border-radius: 8px; }}
+  .note-box h3 {{ margin: 0 0 2mm; }}
+  .note-box .options {{ display: flex; flex-wrap: wrap; gap: 2mm 4mm; align-items: flex-start; }}
+  .note-box .option-item {{ display: inline-flex; white-space: nowrap; font-size: 10pt; }}
 """
 
 male_pct = pct(male, n_total)
@@ -429,8 +432,8 @@ for idx, q in enumerate(question_columns):
         items = []
         for i, opt in enumerate(opts):
             label = alpha_label(i)
-            items.append(f"<div>【{label}】{escape_html(opt)}</div>")
-        options_html = "\n".join(items)
+            items.append(f"<span class=\"option-item\">【{label}】{escape_html(opt)}</span>")
+        options_html = f"<div class=\"options\">{''.join(items)}</div>"
 
     note_box_html = f"<div class=\"note-box\">{inner_sup}<h3>選択肢</h3>{options_html}</div>"
 
