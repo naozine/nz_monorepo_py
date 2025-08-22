@@ -271,6 +271,9 @@ row_totals = ct.sum(axis=1)
 col_totals = ct.sum(axis=0)
 grand_total = int(ct.values.sum())
 
+# 各行の割合（総数に対する％）
+row_pct = row_totals.apply(lambda n: pct(int(n), grand_total)) if grand_total else row_totals.apply(lambda n: 0)
+
 def fmt_int(n: int) -> str:
     return f"{int(n):,}"
 
@@ -310,7 +313,7 @@ html = f"""
 
     <section>
       <h2>回答者属性</h2>
-      <h3>男女×学校区分 クロス集計</h3>
+      <h3>男女別</h3>
       <table class="simple">
         <thead>
           <tr>
@@ -318,6 +321,7 @@ html = f"""
             <th>小学校</th>
             <th>中学校</th>
             <th>合計</th>
+            <th>割合</th>
           </tr>
         </thead>
         <tbody>
@@ -326,12 +330,14 @@ html = f"""
             <td>{fmt_int(ct.loc['男性','小学校'])}</td>
             <td>{fmt_int(ct.loc['男性','中学校'])}</td>
             <td>{fmt_int(row_totals.loc['男性'])}</td>
+            <td>{row_pct.loc['男性']}%</td>
           </tr>
           <tr>
             <td class="label">女性</td>
             <td>{fmt_int(ct.loc['女性','小学校'])}</td>
             <td>{fmt_int(ct.loc['女性','中学校'])}</td>
             <td>{fmt_int(row_totals.loc['女性'])}</td>
+            <td>{row_pct.loc['女性']}%</td>
           </tr>
         </tbody>
         <tfoot>
@@ -340,6 +346,7 @@ html = f"""
             <td>{fmt_int(col_totals.loc['小学校'])}</td>
             <td>{fmt_int(col_totals.loc['中学校'])}</td>
             <td>{fmt_int(grand_total)}</td>
+            <td>100%</td>
           </tr>
         </tfoot>
       </table>
