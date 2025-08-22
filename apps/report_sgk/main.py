@@ -206,7 +206,11 @@ def get_question_options(frame: pd.DataFrame, question_col: str) -> list:
             if s not in seen:
                 seen.add(s)
                 options.append(s)
-    return options
+    # ソート: 辞書順。ただし「その他」は常に最後に配置
+    def sort_key(x: str):
+        return (1 if x == "その他" else 0, x)
+    options_sorted = sorted(options, key=sort_key)
+    return options_sorted
 
 def normalize_gender(x: str) -> str:
     if pd.isna(x) or str(x).strip() == "":
