@@ -179,6 +179,35 @@ def get_question_columns(frame: pd.DataFrame) -> list:
         questions.append(col_str)
     return questions
 
+# 設問の選択肢一覧を返す関数
+# - パラメータ: question_col = 設問の列名（文字列）
+# - 仕様: 列内の文字列を正規化（trim）し、改行区切りも考慮して個別の選択肢に分解
+#         非空の文字列をユニーク（初出順）にして返す
+# - 備考: 列が存在しない場合は空リスト
+
+def get_question_options(frame: pd.DataFrame, question_col: str) -> list:
+    if question_col not in frame.columns:
+        return []
+    series = frame[question_col]
+    # 文字列化とNaN除去
+    series = series.dropna().astype(str)
+    seen = set()
+    options = []
+    for cell in series:
+        cell = cell.strip()
+        if not cell:
+            continue
+        # 改行で分割（複数回答セルに対応）。改行が無ければそのまま1件として扱う
+        parts = re.split(r"[\r\n]+", cell)
+        for p in parts:
+            s = p.strip()
+            if not s:
+                continue
+            if s not in seen:
+                seen.add(s)
+                options.append(s)
+    return options
+
 def normalize_gender(x: str) -> str:
     if pd.isna(x) or str(x).strip() == "":
         return "未回答・その他"
@@ -378,7 +407,28 @@ for idx, q in enumerate(question_columns):
         if first_val is not None:
             inner_sup = f"<h3 class=\"supplement\">{escape_html(first_val)}</h3>"
 
-    note_box_html = f"<div class=\"note-box\">{inner_sup}<h3>選択肢</h3></div>"
+    # 設問の選択肢（ユニーク）を取得して列挙
+    opts = get_question_options(df, q)
+    def alpha_label(i: int) -> str:
+        # A..Z, それ以降はAA, AB...（簡易実装）
+        letters = []
+        i0 = i
+        while True:
+            letters.append(chr(ord('A') + (i0 % 26)))
+            i0 = i0 // 26 - 1
+            if i0 < 0:
+                break
+        return "".join(reversed(letters))
+
+    options_html = ""
+    if opts:
+        items = []
+        for i, opt in enumerate(opts):
+            label = alpha_label(i)
+            items.append(f"<div>【{label}】{escape_html(opt)}</div>")
+        options_html = "\n".join(items)
+
+    note_box_html = f"<div class=\"note-box\">{inner_sup}<h3>選択肢</h3>{options_html}</div>"
 
     section_html = f"""
     <section class=\"page-break\">
