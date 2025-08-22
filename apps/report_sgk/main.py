@@ -222,6 +222,11 @@ a4_css = f"""
   .legend .female::before {{ background: #f58b4c; }}
   .legend .other::before {{ background: #b5b5b5; }}
 
+  /* 概要レイアウト */
+  .overview-list {{ display: grid; grid-template-columns: 38mm 1fr; column-gap: 6mm; row-gap: 2mm; font-size: 11pt; }}
+  .overview-list .label {{ color: #555; }}
+  .overview-list .value {{ font-weight: 600; }}
+
   /* Ensure colors are preserved when printing */
   @media print {{
     * {{ -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }}
@@ -264,9 +269,21 @@ html = f"""
         <div class="line1">東京私立中学高等学校協会 主催</div>
         <div class="line2">2024東京都私立学校展(進学相談会)</div>
       </div>
-      <div class=\"muted\">未就学児{n_preschool:,}組を除く</div>
-      <div class=\"muted\">作成日時: {now_str}</div>
     </header>
+
+    <section>
+      <h2>概要</h2>
+      <div class=\"overview-list\">
+        <div class=\"label\">参加校</div>
+        <div class=\"value\">東京私立中学校・高等学校 415校</div>
+        <div class=\"label\">会場</div>
+        <div class=\"value\">東京国際フォーラム ホールE</div>
+        <div class=\"label\">開催日</div>
+        <div class=\"value\">8月17日（土）18日（日）</div>
+        <div class=\"label\">アンケート回答数</div>
+        <div class=\"value\">{n_total:,}組（未就学児{n_preschool:,}組を除く）</div>
+      </div>
+    </section>
 
     <section>
       <h2>回答人数</h2>
