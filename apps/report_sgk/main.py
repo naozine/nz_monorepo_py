@@ -153,6 +153,32 @@ channel_by_grade = (
 
 # 9) HTMLレポート（A4縦）出力 — サマリ（回答人数／男女比／小学校・中学校比）
 
+# 設問一覧を返す関数
+# - 除外: 性別, 生年月日, 郵便番号, 都道府県, 市区町村
+# - 除外: 列名が「補足説明」で始まる列
+# - 除外: 集計のためにプログラム上で作成したアルファベットの列（ASCII識別子の列名）
+#   例: birth_dt, grade_2024, age_2024, region_bucket, channel_list, learning_list, gender_norm, school_level など
+# - 入力DataFrame中の列順を維持して返す
+
+def get_question_columns(frame: pd.DataFrame) -> list:
+    excluded_exact = {"性別", "生年月日", "郵便番号", "都道府県", "市区町村"}
+
+    def is_ascii_identifier(name: str) -> bool:
+        # 先頭は英字またはアンダースコア、以降は英数字またはアンダースコアのみ
+        return re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(name)) is not None
+
+    questions = []
+    for col in frame.columns:
+        col_str = str(col)
+        if col_str in excluded_exact:
+            continue
+        if col_str.startswith("補足説明"):
+            continue
+        if is_ascii_identifier(col_str):
+            continue
+        questions.append(col_str)
+    return questions
+
 def normalize_gender(x: str) -> str:
     if pd.isna(x) or str(x).strip() == "":
         return "未回答・その他"
@@ -304,6 +330,12 @@ region_rows_html = "\n".join([
     for label in region_rows_order
 ])
 
+# HTML出力直前に設問一覧を取得してコンソール出力
+question_columns = get_question_columns(df)
+print("設問一覧（候補）:")
+for q in question_columns:
+    print(f"- {q}")
+
 html = f"""
 <!doctype html>
 <html lang=\"ja\">
@@ -402,50 +434,6 @@ html = f"""
           </tr>
         </tfoot>
       </table>
-    </section>
-
-    <section>
-      <h2>回答人数</h2>
-      <div class=\"kpis\">
-        <div class=\"kpi\">
-          <div class=\"label\">総回答数</div>
-          <div class=\"value\">{n_total:,} 名</div>
-        </div>
-      </div>
-    </section>
-
-    <section>
-      <h2>男女比</h2>
-      <div class=\"kpi\">
-        <div class=\"label\">男性 / 女性 / その他・未回答</div>
-        <div class=\"bars\">
-          <div class=\"bar\"><span style=\"width:{male_pct}%;\"></span></div>
-          <div class=\"bar secondary\"><span style=\"width:{female_pct}%;\"></span></div>
-          <div class=\"bar other\"><span style=\"width:{other_pct}%;\"></span></div>
-        </div>
-        <div class=\"legend\">
-          <div class=\"item male\">男性: {male:,} 名（{male_pct}%）</div>
-          <div class=\"item female\">女性: {female:,} 名（{female_pct}%）</div>
-          <div class=\"item other\">その他・未回答: {other:,} 名（{other_pct}%）</div>
-        </div>
-      </div>
-    </section>
-
-    <section>
-      <h2>小学校・中学校 比</h2>
-      <div class=\"kpi\">
-        <div class=\"label\">小学校 / 中学校 / 不明</div>
-        <div class=\"bars\">
-          <div class=\"bar\"><span style=\"width:{prim_pct}%;\"></span></div>
-          <div class=\"bar secondary\"><span style=\"width:{mid_pct}%;\"></span></div>
-          <div class=\"bar other\"><span style=\"width:{unknown_lv_pct}%;\"></span></div>
-        </div>
-        <div class=\"legend\">
-          <div class=\"item male\">小学校: {prim:,} 名（{prim_pct}%）</div>
-          <div class=\"item female\">中学校: {mid:,} 名（{mid_pct}%）</div>
-          <div class=\"item other\">不明: {unknown_lv:,} 名（{unknown_lv_pct}%）</div>
-        </div>
-      </div>
     </section>
 
   </div>
