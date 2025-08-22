@@ -71,7 +71,13 @@ df["grade_2024"] = df["birth_dt"].apply(grade_ja_on_april1)
 # 未就学児（2024/04/01時点で6歳未満）を除外するための年齢計算とフィルタ
 # age_onはNaNを返すことがあるため、いったん列にしてから判定
 df["age_2024"] = df["birth_dt"].apply(lambda d: age_on(d, APRIL1))
-preschool_mask = df["age_2024"].notna() & (df["age_2024"] < 6)
+# 未就学児: 年齢が6歳未満、または学年が不明（生年月日不明等）に加えて「対象外」も除外
+preschool_mask = (
+    (df["age_2024"].notna() & (df["age_2024"] < 6))
+    | (df["grade_2024"] == "不明")
+    | (df["grade_2024"] == "対象外")
+)
+
 # 除外数（「組」=1行1組想定）
 n_preschool = int(preschool_mask.sum())
 # 集計に用いる有効データ
