@@ -331,11 +331,17 @@ a4_css = f"""
   .legend .other::before {{ background: #b5b5b5; }}
 
   /* テーブル */
-  table.simple {{ border-collapse: collapse; width: 100%; font-size: 10pt; }}
+  table.simple {{ border-collapse: collapse; width: 90%; font-size: 10pt; margin-left: 6mm; }}
   table.simple th, table.simple td {{ border: 1px solid #e0e0e0; padding: 6px 8px; text-align: right; }}
   table.simple th {{ background: #f9fafb; color: #444; text-align: center; }}
   table.simple tfoot td {{ font-weight: 700; background: #fafafa; }}
   table.simple td.label {{ text-align: left; }}
+  /* 固定カラム幅（全ての.simpleテーブルで列幅を揃える）*/
+  table.simple th:nth-child(1), table.simple td:nth-child(1) {{ width: 28%; }}
+  table.simple th:nth-child(2), table.simple td:nth-child(2) {{ width: 18%; }}
+  table.simple th:nth-child(3), table.simple td:nth-child(3) {{ width: 18%; }}
+  table.simple th:nth-child(4), table.simple td:nth-child(4) {{ width: 18%; }}
+  table.simple th:nth-child(5), table.simple td:nth-child(5) {{ width: 18%; }}
 
   /* 概要レイアウト */
   .overview-list {{ display: grid; grid-template-columns: 38mm 1fr; column-gap: 6mm; row-gap: 2mm; font-size: 10pt; }}
