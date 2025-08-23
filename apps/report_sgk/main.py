@@ -474,8 +474,8 @@ GRADE_ORDER = ["小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "
 
 # 積み上げ棒グラフ設定
 MIN_SEGMENT_WIDTH_PCT = 1.0  # セグメントの最小幅（％）
-OUTSIDE_LABEL_THRESHOLD_PCT = 30.0  # 外側ラベル表示閾値（％）
-OUTSIDE_LABEL_WITH_INNER_PCT_THRESHOLD = 10.0  # 外側ラベル+内側割合表示の閾値（％）
+OUTSIDE_LABEL_THRESHOLD_PCT = 24.0  # 外側ラベル表示閾値（％）
+OUTSIDE_LABEL_WITH_INNER_PCT_THRESHOLD = 5.0  # 外側ラベル+内側割合表示の閾値（％）
 
 # セルから一人分の選択肢セット（重複正規化済み）を取得
 # - 改行区切りを分割し、空を除去し、同一セル内重複を1つにする
