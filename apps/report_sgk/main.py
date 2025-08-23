@@ -1,9 +1,44 @@
 # Python
 import re
+import os
 import pandas as pd
 import numpy as np
 from datetime import datetime
 from pathlib import Path
+
+# 簡易 .env ローダー（外部依存なし）
+# 優先順位: 既存の環境変数 > .env(CWD) > .env(リポジトリルート)
+def _load_env_from_dotenv():
+    def parse_and_set(dotenv_path: Path):
+        if not dotenv_path.exists():
+            return
+        try:
+            for line in dotenv_path.read_text(encoding="utf-8").splitlines():
+                s = line.strip()
+                if not s or s.startswith("#"):  # コメント/空行
+                    continue
+                if "=" not in s:
+                    continue
+                k, v = s.split("=", 1)
+                k = k.strip()
+                v = v.strip()
+                # 値の両端ダブル/シングルクォートを剥がす
+                if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+                    v = v[1:-1]
+                # 既に環境変数に設定されている場合は上書きしない
+                if k and (k not in os.environ or os.environ.get(k) is None):
+                    os.environ[k] = v
+        except Exception:
+            # 読み込み失敗は致命ではないため無視（デフォルト値で継続）
+            pass
+
+    # カレントディレクトリの .env
+    parse_and_set(Path.cwd() / ".env")
+    # リポジトリルート（このファイルから2つ上）
+    repo_root = Path(__file__).resolve().parents[2]
+    parse_and_set(repo_root / ".env")
+
+_load_env_from_dotenv()
 
 # 1) 読み込み
 df = pd.read_excel(Path(__file__).parent / "survey.xlsx", engine="openpyxl")
@@ -971,6 +1006,13 @@ for idx, q in enumerate(question_columns):
 
 question_sections_html = "\n".join(sections)
 
+# 先頭ページの文言を環境変数から取得（.env で設定可能）
+organizer = os.getenv("REPORT_ORGANIZER", "サンプル主催者")
+survey_name = os.getenv("REPORT_SURVEY_NAME", "サンプルイベント名")
+participating_schools = os.getenv("REPORT_PARTICIPATING_SCHOOLS", "参加校 100校")
+venue = os.getenv("REPORT_VENUE", "サンプル会場 A")
+event_dates = os.getenv("REPORT_EVENT_DATES", "9月1日（日）")
+
 html = f"""
 <!doctype html>
 <html lang=\"ja\">
@@ -986,8 +1028,8 @@ html = f"""
   <div class=\"page\">
     <header>
       <div class="title">
-        <div class="line1">東京私立中学高等学校協会 主催</div>
-        <div class="line2">2024東京都私立学校展(進学相談会)</div>
+        <div class="line1">{organizer}</div>
+        <div class="line2">{survey_name}</div>
       </div>
     </header>
 
@@ -995,11 +1037,11 @@ html = f"""
       <h2>概要</h2>
       <div class=\"overview-list\">
         <div class=\"label\">参加校</div>
-        <div class=\"value\">東京私立中学校・高等学校 415校</div>
+        <div class=\"value\">{participating_schools}</div>
         <div class=\"label\">会場</div>
-        <div class=\"value\">東京国際フォーラム ホールE</div>
+        <div class=\"value\">{venue}</div>
         <div class=\"label\">開催日</div>
-        <div class=\"value\">8月17日（土）18日（日）</div>
+        <div class=\"value\">{event_dates}</div>
         <div class=\"label\">アンケート回答数</div>
         <div class=\"value\">{n_total:,}組（未就学児{n_preschool:,}組を除く）</div>
       </div>

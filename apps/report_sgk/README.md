@@ -18,6 +18,28 @@ python main.py
 
 実行すると `report.html` が生成されます。
 
+### 先頭ページの文言を .env で設定する
+
+レポート先頭ページの以下の項目は、環境変数でパラメータ化されています。プロジェクトのルート（または実行ディレクトリ）に `.env` を置くと自動で読み込まれます。
+
+- REPORT_ORGANIZER （例: サンプル主催者）
+- REPORT_SURVEY_NAME （例: サンプルイベント名）
+- REPORT_PARTICIPATING_SCHOOLS （例: 参加校 100校）
+- REPORT_VENUE （例: サンプル会場 A）
+- REPORT_EVENT_DATES （例: 9月1日（日））
+
+例: `.env`
+
+```
+REPORT_ORGANIZER=サンプル主催者
+REPORT_SURVEY_NAME=サンプルイベント名
+REPORT_PARTICIPATING_SCHOOLS=参加校 100校
+REPORT_VENUE=サンプル会場 A
+REPORT_EVENT_DATES=9月1日（日）
+```
+
+.env が存在しない場合や項目が未設定の場合は、既定値（現行ハードコード値）で出力されます。
+
 ## グラフ表示の設定変数
 
 ### セグメント最小幅保証
