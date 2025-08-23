@@ -438,6 +438,9 @@ def preprocess_supplement_html(raw: str) -> str:
 REGION_ORDER = ["東京23区", "三多摩島しょ", "埼玉県", "神奈川県", "千葉県", "その他"]
 GRADE_ORDER = ["小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "中3"]
 
+# 積み上げ棒グラフ設定
+MIN_SEGMENT_WIDTH_PCT = 1.0  # セグメントの最小幅（％）
+
 # セルから一人分の選択肢セット（重複正規化済み）を取得
 # - 改行区切りを分割し、空を除去し、同一セル内重複を1つにする
 # - 返却は set
@@ -525,18 +528,52 @@ def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict,
     S = sum(counts.values())
     if S == 0:
         return ""
-    # 連続レイアウト計算（left% と width%）
+    
+    # 最小幅保証のための調整処理
+    # 1. 実際の割合を計算
+    actual_widths = {}
+    for o in order:
+        c = counts.get(o, 0)
+        if c > 0:
+            actual_widths[o] = (c / S) * 100.0
+    
+    # 2. 最小幅保証の調整
+    adjusted_widths = {}
+    adjustment_needed = 0.0
+    
+    for o, actual_w in actual_widths.items():
+        if actual_w < MIN_SEGMENT_WIDTH_PCT:
+            adjusted_widths[o] = MIN_SEGMENT_WIDTH_PCT
+            adjustment_needed += MIN_SEGMENT_WIDTH_PCT - actual_w
+        else:
+            adjusted_widths[o] = actual_w
+    
+    # 3. 最小幅保証により増えた分を、他のセグメントから比例配分で減らす
+    if adjustment_needed > 0:
+        # 最小幅未満でないセグメントの合計幅
+        reducible_total = sum(w for o, w in actual_widths.items() if w >= MIN_SEGMENT_WIDTH_PCT)
+        
+        if reducible_total > 0:
+            reduction_ratio = adjustment_needed / reducible_total
+            for o in adjusted_widths:
+                if actual_widths[o] >= MIN_SEGMENT_WIDTH_PCT:
+                    adjusted_widths[o] = actual_widths[o] * (1 - reduction_ratio)
+    
+    # 4. HTML生成
     left = 0.0
     segs = []
     for o in order:
-        c = counts.get(o, 0)
-        if c <= 0:
+        if o not in adjusted_widths:
             continue
-        w = (c / S) * 100.0
-        label_pct = round((c / S) * 100.0, 1)
+        
+        c = counts.get(o, 0)
+        w = adjusted_widths[o]
+        label_pct = round((c / S) * 100.0, 1)  # ラベルは実際の割合を表示
+        
         style = f"left:{left:.6f}%;width:{w:.6f}%;background:{colors.get(o,'#999')};"
         segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{escape_html(o)} {label_pct}%\"><span class=\"seg-label\">{escape_html(o)} {label_pct}%</span></div>")
         left += w
+    
     s_text = f"{S:,}{unit}"
     return f"<div class=\"bar-row\"><div class=\"stacked-bar\">{''.join(segs)}</div><div class=\"bar-right\">{s_text}</div></div>"
 
