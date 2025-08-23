@@ -373,7 +373,7 @@ a4_css = f"""
   .leader-line.to-bottom {{ top: 0; }}
   
   .stacked-bar {{ flex: 1 1 auto; position: relative; height: 16px; border-radius: 8px; overflow: hidden; background: #f2f4f8; border: 1px solid #d0d7e2; }}
-  .stacked-bar .seg {{ position: absolute; top: 0; bottom: 0; display: flex; align-items: center; white-space: nowrap; font-size: 9pt; color: #fff; padding: 0 4px; }}
+  .stacked-bar .seg {{ position: absolute; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; white-space: nowrap; font-size: 9pt; color: #fff; padding: 0 4px; }}
   .stacked-bar .seg .seg-label {{ font-weight: 600; text-shadow: 0 1px 0 rgba(0,0,0,0.25); }}
   .bar-right {{ flex: 0 0 22mm; font-size: 9pt; color: #444; text-align: right; }}
   .legend2 {{ display: flex; flex-wrap: wrap; gap: 5mm; font-size: 8pt; color: #555; margin: 1mm 0 2mm; padding-left: 6mm; }}
