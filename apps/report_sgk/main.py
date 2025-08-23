@@ -378,10 +378,10 @@ a4_css = f"""
 
   /* 設問用: 積み上げ横棒 */
   .q-subheading {{ font-size: 10pt; margin: 3mm 0 2mm; color: #333; }}
-  .bar-row {{ display: flex; align-items: center; gap: 6mm; margin: 1.5mm 0; }}
+  .bar-row {{ display: flex; align-items: center; gap: 6mm; margin: 0.8mm 0 2.5mm 0; }}
   
   /* 外側ラベル対応のバーコンテナ */
-  .bar-container {{ display: flex; align-items: center; gap: 6mm; margin: 1.5mm 0; position: relative; }}
+  .bar-container {{ display: flex; align-items: center; gap: 6mm; margin: 0.8mm 0 2.5mm 0; position: relative; }}
   .bar-content {{ flex: 1 1 auto; position: relative; }}
   
   /* 外側ラベル領域 */
@@ -417,7 +417,7 @@ a4_css = f"""
   .stacked-bar .seg {{ position: absolute; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; white-space: nowrap; font-size: 9pt; color: #fff; padding: 0 4px; }}
   .stacked-bar .seg .seg-label {{ font-weight: 600; text-shadow: 0 1px 0 rgba(0,0,0,0.25); }}
   .bar-right {{ flex: 0 0 22mm; font-size: 9pt; color: #444; text-align: right; }}
-  .legend2 {{ display: flex; flex-wrap: wrap; gap: 5mm; font-size: 8pt; color: #555; margin: 1mm 0 2mm; padding-left: 6mm; }}
+  .legend2 {{ display: flex; flex-wrap: wrap; gap: 5mm; font-size: 10pt; font-weight: 600; color: #333; margin: 1mm 0 2mm; padding-left: 6mm; }}
   .legend2 .item {{ display: inline-flex; align-items: center; gap: 4px; }}
   .legend2 .swatch {{ width: 10px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid rgba(0,0,0,0.05); }}
 """
@@ -717,7 +717,7 @@ def calculate_flexbox_positions(labels_data: list, available_width_percent: floa
 
 # 1本の積み上げ棒HTMLを生成
 
-def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict, unit: str) -> str:
+def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict, unit: str, show_total_right: bool = True) -> str:
     S = sum(counts.values())
     if S == 0:
         return ""
@@ -878,17 +878,21 @@ def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict,
     
     # 7. 最終HTML構造
     if outside_labels:
+        right_html = f'<div class="bar-right">{s_text}</div>' if show_total_right else ''
         return f"""<div class="bar-container">
   <div class="bar-content">
     {top_labels_html}
     <div class="stacked-bar">{''.join(segs)}</div>
     {bottom_labels_html}
   </div>
-  <div class="bar-right">{s_text}</div>
+  {right_html}
 </div>"""
     else:
         # 外側ラベルがない場合は従来通り
-        return f'<div class="bar-row"><div class="stacked-bar">{"".join(segs)}</div><div class="bar-right">{s_text}</div></div>'
+        if show_total_right:
+            return f'<div class="bar-row"><div class="stacked-bar">{"".join(segs)}</div><div class="bar-right">{s_text}</div></div>'
+        else:
+            return f'<div class="bar-row"><div class="stacked-bar">{"".join(segs)}</div></div>'
 
 # グループごとの棒群HTML（見出し＋棒複数 or データなし）
 
@@ -900,14 +904,17 @@ def render_group_bars(group_label: str, frames: list, qcol: str, order: list, co
             bars.append(f"<div><div class=\"q-subheading\">{escape_html(name)}</div>{render_stacked_bar(name, counts, order, colors, unit)}</div>")
     if not bars:
         return f"<div class=\"q-subheading\">{escape_html(group_label)}</div><div class=\"muted\">データなし</div>"
-    # group_label as a heading, then stacked bars listed vertically without extra labels
+    # group_label as a heading, then stacked bars listed vertically
     inner = []
+    # 単位から表示サフィックス（人/回）を決定
+    suffix = "回" if unit.endswith("回中") else "人"
     for name, fr in frames:
         counts, S = aggregate_group(fr, qcol, order)
         if S == 0:
             continue
-        bar_html = render_stacked_bar(name, counts, order, colors, unit)
-        inner.append(f"<div><div class=\"muted\" style=\"margin-bottom:1mm;\">{escape_html(name)}</div>{bar_html}</div>")
+        bar_html = render_stacked_bar(name, counts, order, colors, unit, show_total_right=False)
+        label_text = f"{escape_html(name)} = {S:,}{suffix}"
+        inner.append(f"<div><div class=\"muted\" style=\"margin-bottom:0.3mm;\">{label_text}</div>{bar_html}</div>")
     return f"<div class=\"q-subheading\">{escape_html(group_label)}</div>" + "".join(inner)
 
 # 伝説（凡例）
@@ -981,7 +988,10 @@ for idx, q in enumerate(question_columns):
     # 全体棒（他と同じネスト構造にして開始位置を揃える）
     overall_bar_html = ""
     if S_overall > 0:
-        overall_bar_html = f"<div>{render_stacked_bar('全体', overall_counts, order, colors, unit)}</div>"
+        # 全体も他のサブセクションと同様にラベルに合計を表示し、右側の合計は非表示
+        overall_suffix = "回" if unit.endswith("回中") else "人"
+        overall_label = f"全体 = {S_overall:,}{overall_suffix}"
+        overall_bar_html = f"<div><div class=\"muted\" style=\"margin-bottom:0.3mm;\">{overall_label}</div>{render_stacked_bar('全体', overall_counts, order, colors, unit, show_total_right=False)}</div>"
     else:
         overall_bar_html = "<div><div class=\"muted\">データなし</div></div>"
 
@@ -1000,10 +1010,10 @@ for idx, q in enumerate(question_columns):
     <section class=\"page-break\">
       <h2>Q{idx+1} {escape_html(q)}</h2>
       {note_box_html}
-      <div class=\"q-subheading\">全体</div>
-      {overall_bar_html}
       {legend_html}
       {explain_html}
+      <div class=\"q-subheading\">全体</div>
+      {overall_bar_html}
       {region_html}
       {grade_html}
     </section>
