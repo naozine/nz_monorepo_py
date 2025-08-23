@@ -338,6 +338,28 @@ a4_css = f"""
   /* 設問用: 積み上げ横棒 */
   .q-subheading {{ font-size: 10pt; margin: 3mm 0 2mm; color: #333; }}
   .bar-row {{ display: flex; align-items: center; gap: 6mm; margin: 1.5mm 0; }}
+  
+  /* 外側ラベル対応のバーコンテナ */
+  .bar-container {{ display: flex; align-items: center; gap: 6mm; margin: 1.5mm 0; position: relative; }}
+  .bar-content {{ flex: 1 1 auto; position: relative; }}
+  
+  /* 外側ラベル領域 */
+  .outside-labels-top {{ position: relative; margin-bottom: 2mm; }}
+  .outside-labels-bottom {{ position: relative; margin-top: 2mm; }}
+  
+  /* ラベル層 */
+  .label-layer-1 {{ height: 12px; position: relative; }}
+  .label-layer-2 {{ height: 16px; position: relative; }}
+  
+  /* 外側ラベル */
+  .outside-label {{ position: absolute; font-size: 8pt; color: #333; background: rgba(255,255,255,0.9); 
+    padding: 1px 4px; border-radius: 3px; border: 1px solid #ddd; white-space: nowrap; z-index: 10; }}
+  
+  /* リード線 */
+  .leader-line {{ position: absolute; border-left: 1px solid #999; z-index: 5; }}
+  .leader-line.to-top {{ bottom: 0; }}
+  .leader-line.to-bottom {{ top: 0; }}
+  
   .stacked-bar {{ flex: 1 1 auto; position: relative; height: 16px; border-radius: 8px; overflow: hidden; background: #f2f4f8; border: 1px solid #d0d7e2; }}
   .stacked-bar .seg {{ position: absolute; top: 0; bottom: 0; display: flex; align-items: center; white-space: nowrap; font-size: 9pt; color: #fff; padding: 0 4px; }}
   .stacked-bar .seg .seg-label {{ font-weight: 600; text-shadow: 0 1px 0 rgba(0,0,0,0.25); }}
@@ -440,6 +462,7 @@ GRADE_ORDER = ["小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "
 
 # 積み上げ棒グラフ設定
 MIN_SEGMENT_WIDTH_PCT = 1.0  # セグメントの最小幅（％）
+OUTSIDE_LABEL_THRESHOLD_PCT = 30.0  # 外側ラベル表示閾値（％）
 
 # セルから一人分の選択肢セット（重複正規化済み）を取得
 # - 改行区切りを分割し、空を除去し、同一セル内重複を1つにする
@@ -529,7 +552,6 @@ def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict,
     if S == 0:
         return ""
     
-    # 最小幅保証のための調整処理
     # 1. 実際の割合を計算
     actual_widths = {}
     for o in order:
@@ -537,20 +559,32 @@ def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict,
         if c > 0:
             actual_widths[o] = (c / S) * 100.0
     
-    # 2. 最小幅保証の調整
+    # 2. 外側ラベル対象を判定
+    outside_labels = []
+    inside_segments = []
+    
+    for o in order:
+        if o not in actual_widths:
+            continue
+        actual_w = actual_widths[o]
+        if actual_w < OUTSIDE_LABEL_THRESHOLD_PCT:
+            outside_labels.append(o)
+        else:
+            inside_segments.append(o)
+    
+    # 3. 最小幅保証の調整（内側ラベルのセグメントに対して）
     adjusted_widths = {}
     adjustment_needed = 0.0
     
     for o, actual_w in actual_widths.items():
-        if actual_w < MIN_SEGMENT_WIDTH_PCT:
+        if o in inside_segments and actual_w < MIN_SEGMENT_WIDTH_PCT:
             adjusted_widths[o] = MIN_SEGMENT_WIDTH_PCT
             adjustment_needed += MIN_SEGMENT_WIDTH_PCT - actual_w
         else:
             adjusted_widths[o] = actual_w
     
-    # 3. 最小幅保証により増えた分を、他のセグメントから比例配分で減らす
+    # 4. 最小幅保証により増えた分を、他のセグメントから比例配分で減らす
     if adjustment_needed > 0:
-        # 最小幅未満でないセグメントの合計幅
         reducible_total = sum(w for o, w in actual_widths.items() if w >= MIN_SEGMENT_WIDTH_PCT)
         
         if reducible_total > 0:
@@ -559,7 +593,74 @@ def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict,
                 if actual_widths[o] >= MIN_SEGMENT_WIDTH_PCT:
                     adjusted_widths[o] = actual_widths[o] * (1 - reduction_ratio)
     
-    # 4. HTML生成
+    # 5. 外側ラベル配置の計算
+    def calculate_outside_labels_html():
+        if not outside_labels:
+            return "", ""
+        
+        # ラベル配置: 上下交互、1つ目=上直近、2つ目=下直近、3つ目=上遠く、4つ目=下遠く...
+        top_labels_layer1 = []  # 直近（リード線なし）
+        top_labels_layer2 = []  # 遠く（リード線あり）
+        bottom_labels_layer1 = []  # 直近（リード線なし）
+        bottom_labels_layer2 = []  # 遠く（リード線あり）
+        
+        for i, o in enumerate(outside_labels):
+            # セグメント中央位置を計算
+            left_pos = 0.0
+            for prev_o in order:
+                if prev_o == o:
+                    break
+                if prev_o in adjusted_widths:
+                    left_pos += adjusted_widths[prev_o]
+            
+            center_pos = left_pos + (adjusted_widths.get(o, 0) / 2)
+            label_pct = round((counts.get(o, 0) / S) * 100.0, 1)
+            label_text = f"{escape_html(o)} {label_pct}%"
+            
+            # 配置ルール
+            if i == 0:  # 1つ目: 上直近
+                top_labels_layer1.append((center_pos, label_text, o))
+            elif i == 1:  # 2つ目: 下直近
+                bottom_labels_layer1.append((center_pos, label_text, o))
+            elif i % 2 == 0:  # 3つ目以降偶数: 上遠く
+                top_labels_layer2.append((center_pos, label_text, o))
+            else:  # 4つ目以降奇数: 下遠く
+                bottom_labels_layer2.append((center_pos, label_text, o))
+        
+        # HTML生成
+        def render_label_layer(labels, layer_class, has_leader_line=False, line_direction=""):
+            if not labels:
+                return ""
+            layer_html = f'<div class="{layer_class}">'
+            for pos, text, option in labels:
+                label_style = f"left:{pos:.2f}%; transform:translateX(-50%);"
+                layer_html += f'<div class="outside-label" style="{label_style}">{text}</div>'
+                if has_leader_line:
+                    line_style = f"left:{pos:.2f}%; height:100%;"
+                    layer_html += f'<div class="leader-line {line_direction}" style="{line_style}"></div>'
+            layer_html += '</div>'
+            return layer_html
+        
+        top_html = ""
+        if top_labels_layer2:
+            top_html += render_label_layer(top_labels_layer2, "label-layer-2", True, "to-bottom")
+        if top_labels_layer1:
+            top_html += render_label_layer(top_labels_layer1, "label-layer-1")
+        
+        bottom_html = ""
+        if bottom_labels_layer1:
+            bottom_html += render_label_layer(bottom_labels_layer1, "label-layer-1")
+        if bottom_labels_layer2:
+            bottom_html += render_label_layer(bottom_labels_layer2, "label-layer-2", True, "to-top")
+        
+        top_container = f'<div class="outside-labels-top">{top_html}</div>' if top_html else ""
+        bottom_container = f'<div class="outside-labels-bottom">{bottom_html}</div>' if bottom_html else ""
+        
+        return top_container, bottom_container
+    
+    top_labels_html, bottom_labels_html = calculate_outside_labels_html()
+    
+    # 6. セグメントHTML生成（内側ラベルのみ）
     left = 0.0
     segs = []
     for o in order:
@@ -568,14 +669,34 @@ def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict,
         
         c = counts.get(o, 0)
         w = adjusted_widths[o]
-        label_pct = round((c / S) * 100.0, 1)  # ラベルは実際の割合を表示
+        label_pct = round((c / S) * 100.0, 1)
         
         style = f"left:{left:.6f}%;width:{w:.6f}%;background:{colors.get(o,'#999')};"
-        segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{escape_html(o)} {label_pct}%\"><span class=\"seg-label\">{escape_html(o)} {label_pct}%</span></div>")
+        
+        # 内側ラベル表示判定
+        if o in inside_segments:
+            segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{escape_html(o)} {label_pct}%\"><span class=\"seg-label\">{escape_html(o)} {label_pct}%</span></div>")
+        else:
+            # 外側ラベル対象はラベル非表示
+            segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{escape_html(o)} {label_pct}%\"></div>")
+        
         left += w
     
     s_text = f"{S:,}{unit}"
-    return f"<div class=\"bar-row\"><div class=\"stacked-bar\">{''.join(segs)}</div><div class=\"bar-right\">{s_text}</div></div>"
+    
+    # 7. 最終HTML構造
+    if outside_labels:
+        return f"""<div class="bar-container">
+  <div class="bar-content">
+    {top_labels_html}
+    <div class="stacked-bar">{''.join(segs)}</div>
+    {bottom_labels_html}
+  </div>
+  <div class="bar-right">{s_text}</div>
+</div>"""
+    else:
+        # 外側ラベルがない場合は従来通り
+        return f'<div class="bar-row"><div class="stacked-bar">{"".join(segs)}</div><div class="bar-right">{s_text}</div></div>'
 
 # グループごとの棒群HTML（見出し＋棒複数 or データなし）
 
