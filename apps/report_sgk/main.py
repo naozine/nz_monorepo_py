@@ -344,8 +344,12 @@ a4_css = f"""
   .bar-content {{ flex: 1 1 auto; position: relative; }}
   
   /* 外側ラベル領域 */
-  .outside-labels-top {{ position: relative; margin-bottom: 2mm; }}
-  .outside-labels-bottom {{ position: relative; margin-top: 2mm; }}
+  .outside-labels-top {{ position: relative; margin-bottom: 0; }}
+  .outside-labels-bottom {{ position: relative; margin-top: 0; }}
+  
+  /* 上下のラベル配置を調整 */
+  .outside-labels-top .label-layer-1 {{ display: flex; align-items: end; }}  /* 下端揃え */
+  .outside-labels-bottom .label-layer-1 {{ display: flex; align-items: start; }}  /* 上端揃え */
   
   /* ラベル層（動的多層対応） */
   .label-layer-1 {{ height: 12px; position: relative; }}
