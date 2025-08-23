@@ -558,6 +558,122 @@ def order_options_by_overall(counts: dict, S_overall: int) -> list:
         return (1 if o == "その他" else 0, -pct_val, o)
     return sorted(opts, key=key)
 
+# ラベル幅推定機能
+def estimate_label_width_px(text: str, font_size_pt: int = 8) -> float:
+    """
+    ラベルテキストの推定幅をピクセル単位で計算
+    日本語文字を考慮した簡易的な幅推定
+    """
+    if not text:
+        return 0.0
+    
+    # フォントサイズをピクセルに変換（1pt ≈ 1.33px）
+    font_size_px = font_size_pt * 1.33
+    
+    # 文字種別による幅係数
+    ascii_count = sum(1 for c in text if ord(c) < 128)
+    japanese_count = len(text) - ascii_count
+    
+    # ASCII文字: フォントサイズの約0.6倍, 日本語文字: フォントサイズの約1倍
+    estimated_width = (ascii_count * font_size_px * 0.6) + (japanese_count * font_size_px * 1.0)
+    
+    # パディング（左右4px + 境界線等）を追加
+    padding = 10
+    
+    return estimated_width + padding
+
+def estimate_label_width_percent(text: str, bar_width_px: float, font_size_pt: int = 8) -> float:
+    """
+    ラベルテキストの幅を棒グラフ全体に対する割合（%）で計算
+    """
+    if bar_width_px <= 0:
+        return 0.0
+    
+    width_px = estimate_label_width_px(text, font_size_pt)
+    return (width_px / bar_width_px) * 100.0
+
+# 改良されたFlexbox風配置アルゴリズム
+def calculate_flexbox_positions(labels_data: list, available_width_percent: float = 100.0) -> list:
+    """
+    改良されたFlexbox風のラベル配置を計算
+    - 重なりがない場合は元の位置を保持
+    - 重なりがある場合のみ最小限の調整を実行
+    Args:
+        labels_data: [(center_pos_percent, text, option), ...]
+        available_width_percent: 利用可能な幅（%）
+    Returns:
+        [(adjusted_pos_percent, text, option), ...]
+    """
+    if not labels_data:
+        return []
+    
+    # 1つだけの場合は元の位置をそのまま保持
+    if len(labels_data) == 1:
+        return labels_data
+    
+    # 各ラベルの推定幅を計算（棒グラフ幅を180mm ≈ 680pxと仮定）
+    bar_width_px = 680.0
+    label_widths = []
+    
+    for center_pos, text, option in labels_data:
+        width_percent = estimate_label_width_percent(text, bar_width_px)
+        label_widths.append(width_percent)
+    
+    # 重なりを検出
+    positions_and_widths = []
+    for i, (center_pos, text, option) in enumerate(labels_data):
+        width = label_widths[i]
+        left_edge = center_pos - width / 2
+        right_edge = center_pos + width / 2
+        positions_and_widths.append((center_pos, left_edge, right_edge, text, option))
+    
+    # 重なりがあるかチェック（余裕を持たせて判定）
+    OVERLAP_MARGIN = 2.0  # ラベル間の最小マージン（%）
+    has_significant_overlap = False
+    
+    for i in range(len(positions_and_widths)):
+        for j in range(i + 1, len(positions_and_widths)):
+            left1, right1 = positions_and_widths[i][1], positions_and_widths[i][2]
+            left2, right2 = positions_and_widths[j][1], positions_and_widths[j][2]
+            # マージンを考慮した重なり判定
+            if not (right1 + OVERLAP_MARGIN <= left2 or right2 + OVERLAP_MARGIN <= left1):
+                has_significant_overlap = True
+                break
+        if has_significant_overlap:
+            break
+    
+    # 重なりがない、または軽微な場合は元の位置を保持
+    if not has_significant_overlap:
+        return [(pos, text, option) for pos, _, _, text, option in positions_and_widths]
+    
+    # 重なりがある場合: 最小限の調整で解決を試行
+    # まず、元の位置順序を保持しつつ、最小限の移動で重なりを解消
+    sorted_positions = sorted(positions_and_widths, key=lambda x: x[0])  # center_posでソート
+    
+    adjusted_positions = []
+    for i, (original_center, _, _, text, option) in enumerate(sorted_positions):
+        width = label_widths[labels_data.index((original_center, text, option))]
+        
+        if i == 0:
+            # 最初のラベル: 左端制約のみ考慮
+            pos = max(width / 2, original_center)
+        else:
+            # 前のラベルとの重なりを避ける最小位置
+            prev_pos = adjusted_positions[i-1][0]
+            prev_width = label_widths[labels_data.index((sorted_positions[i-1][0], sorted_positions[i-1][3], sorted_positions[i-1][4]))]
+            min_pos = prev_pos + prev_width / 2 + width / 2 + OVERLAP_MARGIN
+            
+            # 元の位置と最小位置の大きい方を選択（可能な限り元位置に近づける）
+            pos = max(min_pos, original_center)
+            
+            # ただし、右端を超える場合は制限
+            if pos + width / 2 > available_width_percent:
+                pos = available_width_percent - width / 2
+        
+        adjusted_positions.append((pos, text, option))
+    
+    return adjusted_positions
+
 # 1本の積み上げ棒HTMLを生成
 
 def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict, unit: str) -> str:
@@ -606,17 +722,14 @@ def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict,
                 if actual_widths[o] >= MIN_SEGMENT_WIDTH_PCT:
                     adjusted_widths[o] = actual_widths[o] * (1 - reduction_ratio)
     
-    # 5. 外側ラベル配置の計算
+    # 5. 外側ラベル配置の計算（新しいFlexbox風アルゴリズム）
     def calculate_outside_labels_html():
         if not outside_labels:
             return "", ""
         
-        # 動的多層配置: 上下交互に層を追加していく
-        from collections import defaultdict
-        top_layers = defaultdict(list)  # {layer_number: [(pos, text, option), ...]}
-        bottom_layers = defaultdict(list)
-        
-        for i, o in enumerate(outside_labels):
+        # 各外側ラベルの基本情報を集める
+        label_data = []
+        for o in outside_labels:
             # セグメント中央位置を計算
             left_pos = 0.0
             for prev_o in order:
@@ -630,23 +743,29 @@ def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict,
             
             # 外側ラベルの表示内容を判定
             if label_pct >= OUTSIDE_LABEL_WITH_INNER_PCT_THRESHOLD:
-                # 10%以上: 外側は選択肢名のみ、内側に割合表示
+                # 5%以上: 外側は選択肢名のみ、内側に割合表示
                 label_text = f"{escape_html(o)}"
             else:
-                # 10%未満: 外側に選択肢名+割合表示
+                # 5%未満: 外側に選択肢名+割合表示
                 label_text = f"{escape_html(o)} {label_pct}%"
             
-            # 新しい配置ルール: 上下交互に層を増やす
-            if i == 0:  # 1つ目: 上layer1（直近、リード線なし）
-                top_layers[1].append((center_pos, label_text, o))
-            elif i == 1:  # 2つ目: 下layer1（直近、リード線なし）
-                bottom_layers[1].append((center_pos, label_text, o))
-            elif i % 2 == 0:  # 3つ目以降偶数: 上側に配置
-                layer_num = (i // 2) + 1  # 3つ目→layer2, 5つ目→layer3, ...
-                top_layers[layer_num].append((center_pos, label_text, o))
-            else:  # 4つ目以降奇数: 下側に配置  
-                layer_num = (i // 2) + 1  # 4つ目→layer2, 6つ目→layer3, ...
-                bottom_layers[layer_num].append((center_pos, label_text, o))
+            label_data.append((center_pos, label_text, o))
+        
+        # Flexbox風配置で位置調整
+        adjusted_label_data = calculate_flexbox_positions(label_data, 100.0)
+        
+        # 調整後の配置で層分けを実行
+        # 可能な限り同じ高さ（layer1）に配置し、重なりがある場合のみ分散
+        from collections import defaultdict
+        top_layers = defaultdict(list)
+        bottom_layers = defaultdict(list)
+        
+        # まずは全て上layer1に配置を試行
+        for i, (pos, text, option) in enumerate(adjusted_label_data):
+            if i < len(adjusted_label_data) // 2:  # 前半は上側
+                top_layers[1].append((pos, text, option))
+            else:  # 後半は下側
+                bottom_layers[1].append((pos, text, option))
         
         # HTML生成：動的に層を構築
         def render_label_layer(labels, layer_num, has_leader_line=False, line_direction=""):
