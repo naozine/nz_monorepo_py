@@ -334,6 +334,17 @@ a4_css = f"""
   .note-box h3 {{ margin: 0 0 2mm; }}
   .note-box .options {{ display: flex; flex-wrap: wrap; gap: 2mm 4mm; align-items: flex-start; }}
   .note-box .option-item {{ display: inline-flex; white-space: nowrap; font-size: 10pt; }}
+
+  /* 設問用: 積み上げ横棒 */
+  .q-subheading {{ font-size: 10pt; margin: 3mm 0 2mm; color: #333; }}
+  .bar-row {{ display: flex; align-items: center; gap: 6mm; margin: 1.5mm 0; }}
+  .stacked-bar {{ flex: 1 1 auto; position: relative; height: 16px; border-radius: 8px; overflow: hidden; background: #f2f4f8; border: 1px solid #d0d7e2; }}
+  .stacked-bar .seg {{ position: absolute; top: 0; bottom: 0; display: flex; align-items: center; white-space: nowrap; font-size: 9pt; color: #fff; padding: 0 4px; }}
+  .stacked-bar .seg .seg-label {{ font-weight: 600; text-shadow: 0 1px 0 rgba(0,0,0,0.25); }}
+  .bar-right {{ flex: 0 0 auto; font-size: 9pt; color: #444; }}
+  .legend2 {{ display: flex; flex-wrap: wrap; gap: 5mm; font-size: 8pt; color: #555; margin: 1mm 0 2mm; }}
+  .legend2 .item {{ display: inline-flex; align-items: center; gap: 4px; }}
+  .legend2 .swatch {{ width: 10px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid rgba(0,0,0,0.05); }}
 """
 
 male_pct = pct(male, n_total)
@@ -423,6 +434,140 @@ def preprocess_supplement_html(raw: str) -> str:
     escaped = escaped.replace("）", "）</span>")
     return escaped
 
+# ---- 設問集計用ヘルパ ----
+REGION_ORDER = ["東京23区", "三多摩島しょ", "埼玉県", "神奈川県", "千葉県", "その他"]
+GRADE_ORDER = ["小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "中3"]
+
+# セルから一人分の選択肢セット（重複正規化済み）を取得
+# - 改行区切りを分割し、空を除去し、同一セル内重複を1つにする
+# - 返却は set
+
+def cell_to_unique_set(val) -> set:
+    if pd.isna(val):
+        return set()
+    s = str(val).strip()
+    if not s:
+        return set()
+    parts = re.split(r"[\r\n]+", s)
+    uniq = []
+    seen = set()
+    for p in parts:
+        t = p.strip()
+        if not t:
+            continue
+        if t not in seen:
+            seen.add(t)
+            uniq.append(t)
+    return set(uniq)
+
+# 複数回答可の推定
+# - 見出しに「複数」などの語が含まれる場合は True
+# - それ以外でも、実データで1セル内に2つ以上の選択が存在する場合は True
+
+def is_multiselect(frame: pd.DataFrame, qcol: str) -> bool:
+    name = str(qcol)
+    if ("複数" in name) or ("複数回答" in name):
+        return True
+    series = frame[qcol].dropna()
+    for v in series.head(200):  # 全件でなくても傾向は分かる
+        if len(cell_to_unique_set(v)) >= 2:
+            return True
+    return False
+
+# 集計（1グループ）: counts辞書とSを返す
+
+def aggregate_group(frame: pd.DataFrame, qcol: str, options: list):
+    opt_set = set(options)
+    counts = {opt: 0 for opt in options}
+    S = 0
+    for v in frame[qcol].dropna():
+        chosen = [o for o in cell_to_unique_set(v) if o in opt_set]
+        if not chosen:
+            continue
+        for o in chosen:
+            counts[o] += 1
+        S += len(chosen)
+    return counts, S
+
+# オプションの色割り当て（設問内で一貫）
+# - 「その他」は常に #b5b5b5
+# - それ以外はパレットを順番に
+
+def color_map_for_options(options: list) -> dict:
+    palette = [
+        "#4c8bf5", "#f58b4c", "#57b26a", "#9166cc", "#e04f5f",
+        "#39c0cf", "#f2c94c", "#7f8c8d", "#2ecc71", "#e67e22",
+        "#9b59b6", "#1abc9c", "#e84393", "#0984e3", "#6c5ce7"
+    ]
+    # その他は最後扱い
+    base = [o for o in options if o != "その他"]
+    cmap = {}
+    i = 0
+    for o in base:
+        cmap[o] = palette[i % len(palette)]
+        i += 1
+    if "その他" in options:
+        cmap["その他"] = "#b5b5b5"
+    return cmap
+
+# オプション並び順: 全体割合降順。同率は辞書順。「その他」は常に最後
+
+def order_options_by_overall(counts: dict, S_overall: int) -> list:
+    opts = list(counts.keys())
+    def key(o):
+        pct_val = 0.0 if S_overall == 0 else counts[o] / S_overall
+        return (1 if o == "その他" else 0, -pct_val, o)
+    return sorted(opts, key=key)
+
+# 1本の積み上げ棒HTMLを生成
+
+def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict) -> str:
+    S = sum(counts.values())
+    if S == 0:
+        return ""
+    # 連続レイアウト計算（left% と width%）
+    left = 0.0
+    segs = []
+    for o in order:
+        c = counts.get(o, 0)
+        if c <= 0:
+            continue
+        w = (c / S) * 100.0
+        label_pct = round((c / S) * 100.0, 1)
+        style = f"left:{left:.6f}%;width:{w:.6f}%;background:{colors.get(o,'#999')};"
+        segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{escape_html(o)} {label_pct}%\"><span class=\"seg-label\">{escape_html(o)} {label_pct}%</span></div>")
+        left += w
+    s_text = f"S={S:,}選択"
+    return f"<div class=\"bar-row\"><div class=\"stacked-bar\">{''.join(segs)}</div><div class=\"bar-right\">{s_text}</div></div>"
+
+# グループごとの棒群HTML（見出し＋棒複数 or データなし）
+
+def render_group_bars(group_label: str, frames: list, qcol: str, order: list, colors: dict) -> str:
+    bars = []
+    for name, fr in frames:
+        counts, S = aggregate_group(fr, qcol, order)
+        if S > 0:
+            bars.append(f"<div><div class=\"q-subheading\">{escape_html(name)}</div>{render_stacked_bar(name, counts, order, colors)}</div>")
+    if not bars:
+        return f"<div class=\"q-subheading\">{escape_html(group_label)}</div><div class=\"muted\">データなし</div>"
+    # group_label as a heading, then stacked bars listed vertically without extra labels
+    inner = []
+    for name, fr in frames:
+        counts, S = aggregate_group(fr, qcol, order)
+        if S == 0:
+            continue
+        bar_html = render_stacked_bar(name, counts, order, colors)
+        inner.append(f"<div><div class=\"muted\" style=\"margin-bottom:1mm;\">{escape_html(name)}</div>{bar_html}</div>")
+    return f"<div class=\"q-subheading\">{escape_html(group_label)}</div>" + "".join(inner)
+
+# 伝説（凡例）
+
+def render_legend(order: list[str], colors: dict) -> str:
+    items = []
+    for o in order:
+        items.append(f"<span class=\"item\"><span class=\"swatch\" style=\"background:{colors.get(o,'#999')}\"></span>{escape_html(o)}</span>")
+    return f"<div class=\"legend2\">{''.join(items)}</div>"
+
 sections = []
 for idx, q in enumerate(question_columns):
     # 補足説明列が存在すれば、最初の非空データを拾って表示（角丸矩形の中に配置）
@@ -456,11 +601,51 @@ for idx, q in enumerate(question_columns):
 
     note_box_html = f"<div class=\"note-box\">{inner_sup}<h3>選択肢</h3>{options_html}</div>"
 
+    # オプションなしの場合はスキップ（安全）
+    if not opts:
+        section_html = f"""
+        <section class=\"page-break\">
+          <h2>Q{idx+1} {q}</h2>
+          {note_box_html}
+          <div class=\"muted\">データなし</div>
+        </section>
+        """.strip()
+        sections.append(section_html)
+        continue
+
+    # 集計：全体
+    overall_counts, S_overall = aggregate_group(df_eff, q, opts)
+    # 並び順（全体割合降順。同率は辞書順。その他は最後）
+    order = order_options_by_overall(overall_counts, S_overall)
+    # 色割当（設問内で固定）
+    colors = color_map_for_options(order)
+
+    # 全体棒
+    overall_bar_html = ""
+    if S_overall > 0:
+        overall_bar_html = render_stacked_bar("全体", overall_counts, order, colors)
+    else:
+        overall_bar_html = "<div class=\"muted\">データなし</div>"
+
+    # 地域別
+    region_frames = [(lab, df_eff[df_eff["region_bucket"] == lab]) for lab in REGION_ORDER]
+    region_html = render_group_bars("地域別", region_frames, q, order, colors)
+
+    # 学年別
+    grade_frames = [(lab, df_eff[df_eff["grade_2024"] == lab]) for lab in GRADE_ORDER]
+    grade_html = render_group_bars("学年別", grade_frames, q, order, colors)
+
+    legend_html = render_legend(order, colors)
+
     section_html = f"""
     <section class=\"page-break\">
-      <h2>Q{idx+1} {q}</h2>
+      <h2>Q{idx+1} {escape_html(q)}</h2>
       {note_box_html}
-      <p>この設問の集計は準備中です。（ダミー）</p>
+      <div class=\"q-subheading\">全体</div>
+      {overall_bar_html}
+      {region_html}
+      {grade_html}
+      {legend_html}
     </section>
     """.strip()
     sections.append(section_html)
