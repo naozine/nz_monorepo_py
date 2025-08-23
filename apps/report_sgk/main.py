@@ -937,22 +937,29 @@ def render_option_count_table(sub_label: str, header_label: str, frames: list[tu
     # 全体のフレーム（全カテゴリ結合）
     all_frame = pd.concat([fr for _, fr in frames], axis=0) if frames else df_eff
     overall_counts, _S_overall = aggregate_group(all_frame, qcol, options)
+    # 分母（回答者数）: 設問によらず、全体は n_total、各カテゴリは len(fr)
+    overall_denom = n_total
 
     # 各カテゴリの集計を事前計算
-    per_frame_counts = []  # [(name, counts_dict)]
+    per_frame_counts = []  # [(name, counts_dict, denom)]
     for name, fr in frames:
         counts, _S = aggregate_group(fr, qcol, options)
-        per_frame_counts.append((name, counts))
+        denom = len(fr)
+        per_frame_counts.append((name, counts, denom))
 
     # 行: 各選択肢
     body_rows = []
     for o in options:
         tds = [f"<td class=\"label\">{escape_html(o)}</td>"]
-        # 全体
-        tds.append(f"<td>{fmt_int(overall_counts.get(o, 0))}</td>")
-        # 各カテゴリ
-        for name, counts in per_frame_counts:
-            tds.append(f"<td>{fmt_int(counts.get(o, 0))}</td>")
+        # 全体（分母: 回答者数）
+        ov_num = overall_counts.get(o, 0)
+        ov_pct = 0 if overall_denom == 0 else round(ov_num * 100.0 / overall_denom, 1)
+        tds.append(f"<td>{fmt_int(ov_num)}<div class=\"muted\" style=\"font-size:8pt;\">{ov_pct}%</div></td>")
+        # 各カテゴリ（分母: そのカテゴリの回答者数）
+        for name, counts, denom in per_frame_counts:
+            num = counts.get(o, 0)
+            pct_val = 0 if denom == 0 else round(num * 100.0 / denom, 1)
+            tds.append(f"<td>{fmt_int(num)}<div class=\"muted\" style=\"font-size:8pt;\">{pct_val}%</div></td>")
         body_rows.append("<tr>" + "".join(tds) + "</tr>")
 
     tbody = "<tbody>" + "".join(body_rows) + "</tbody>"
