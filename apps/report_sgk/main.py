@@ -475,6 +475,7 @@ GRADE_ORDER = ["小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "
 # 積み上げ棒グラフ設定
 MIN_SEGMENT_WIDTH_PCT = 1.0  # セグメントの最小幅（％）
 OUTSIDE_LABEL_THRESHOLD_PCT = 30.0  # 外側ラベル表示閾値（％）
+OUTSIDE_LABEL_WITH_INNER_PCT_THRESHOLD = 10.0  # 外側ラベル+内側割合表示の閾値（％）
 
 # セルから一人分の選択肢セット（重複正規化済み）を取得
 # - 改行区切りを分割し、空を除去し、同一セル内重複を1つにする
@@ -626,7 +627,14 @@ def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict,
             
             center_pos = left_pos + (adjusted_widths.get(o, 0) / 2)
             label_pct = round((counts.get(o, 0) / S) * 100.0, 1)
-            label_text = f"{escape_html(o)} {label_pct}%"
+            
+            # 外側ラベルの表示内容を判定
+            if label_pct >= OUTSIDE_LABEL_WITH_INNER_PCT_THRESHOLD:
+                # 10%以上: 外側は選択肢名のみ、内側に割合表示
+                label_text = f"{escape_html(o)}"
+            else:
+                # 10%未満: 外側に選択肢名+割合表示
+                label_text = f"{escape_html(o)} {label_pct}%"
             
             # 新しい配置ルール: 上下交互に層を増やす
             if i == 0:  # 1つ目: 上layer1（直近、リード線なし）
@@ -693,10 +701,16 @@ def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict,
         
         # 内側ラベル表示判定
         if o in inside_segments:
+            # 内側セグメント: 選択肢名+割合表示（従来通り）
             segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{escape_html(o)} {label_pct}%\"><span class=\"seg-label\">{escape_html(o)} {label_pct}%</span></div>")
         else:
-            # 外側ラベル対象はラベル非表示
-            segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{escape_html(o)} {label_pct}%\"></div>")
+            # 外側ラベル対象
+            if label_pct >= OUTSIDE_LABEL_WITH_INNER_PCT_THRESHOLD:
+                # 10%以上: 棒内部に割合のみ表示
+                segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{escape_html(o)} {label_pct}%\"><span class=\"seg-label\">{label_pct}%</span></div>")
+            else:
+                # 10%未満: 棒内部にラベル非表示
+                segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{escape_html(o)} {label_pct}%\"></div>")
         
         left += w
     
