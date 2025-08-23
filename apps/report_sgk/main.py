@@ -925,6 +925,31 @@ def render_legend(order: list[str], colors: dict) -> str:
         items.append(f"<span class=\"item\"><span class=\"swatch\" style=\"background:{colors.get(o,'#999')}\"></span>{escape_html(o)}</span>")
     return f"<div class=\"legend2\">{''.join(items)}</div>"
 
+# 指定したフレーム群に対して、選択肢ごとのカウント表を生成
+# columns: [sub_label] + options
+# rows: 先頭に「全体」、続いて各カテゴリ
+
+def render_option_count_table(sub_label: str, header_label: str, frames: list[tuple[str, pd.DataFrame]], qcol: str, options: list[str]) -> str:
+    # ヘッダー
+    head_cells = [escape_html(header_label)] + [escape_html(o) for o in options]
+    thead = "<thead><tr>" + "".join([f"<th>{c}</th>" for c in head_cells]) + "</tr></thead>"
+
+    # 本文行を作成するヘルパ
+    def row_html(label: str, frame: pd.DataFrame) -> str:
+        counts, S = aggregate_group(frame, qcol, options)
+        tds = [f"<td class=\"label\">{escape_html(label)}</td>"]
+        for o in options:
+            tds.append(f"<td>{fmt_int(counts.get(o, 0))}</td>")
+        return "<tr>" + "".join(tds) + "</tr>"
+
+    # 全体行 + 各カテゴリ行
+    body_rows = [row_html("全体", pd.concat([fr for _, fr in frames], axis=0) if frames else df_eff)]
+    for name, fr in frames:
+        body_rows.append(row_html(name, fr))
+    tbody = "<tbody>" + "".join(body_rows) + "</tbody>"
+
+    return f"<div class=\"q-subheading\">{escape_html(sub_label)}</div><table class=\"simple\">{thead}{tbody}</table>"
+
 sections = []
 for idx, q in enumerate(question_columns):
     # 補足説明列が存在すれば、最初の非空データを拾って表示（角丸矩形の中に配置）
@@ -1006,10 +1031,16 @@ for idx, q in enumerate(question_columns):
     grade_frames = [(lab, df_eff[df_eff["grade_2024"] == lab]) for lab in GRADE_ORDER]
     grade_html = render_group_bars("学年別", grade_frames, q, order, colors, unit)
 
+    # テーブル（角丸矩形の直下に配置）
+    region_table_html = render_option_count_table("地域別", "地域", region_frames, q, order)
+    grade_table_html = render_option_count_table("学年別", "学年", grade_frames, q, order)
+
     section_html = f"""
     <section class=\"page-break\">
       <h2>Q{idx+1} {escape_html(q)}</h2>
       {note_box_html}
+      {region_table_html}
+      {grade_table_html}
       {legend_html}
       {explain_html}
       <div class=\"q-subheading\">全体</div>
