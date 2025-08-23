@@ -347,9 +347,17 @@ a4_css = f"""
   .outside-labels-top {{ position: relative; margin-bottom: 2mm; }}
   .outside-labels-bottom {{ position: relative; margin-top: 2mm; }}
   
-  /* ラベル層 */
+  /* ラベル層（動的多層対応） */
   .label-layer-1 {{ height: 12px; position: relative; }}
   .label-layer-2 {{ height: 16px; position: relative; }}
+  .label-layer-3 {{ height: 16px; position: relative; }}
+  .label-layer-4 {{ height: 16px; position: relative; }}
+  .label-layer-5 {{ height: 16px; position: relative; }}
+  .label-layer-6 {{ height: 16px; position: relative; }}
+  .label-layer-7 {{ height: 16px; position: relative; }}
+  .label-layer-8 {{ height: 16px; position: relative; }}
+  .label-layer-9 {{ height: 16px; position: relative; }}
+  .label-layer-10 {{ height: 16px; position: relative; }}
   
   /* 外側ラベル */
   .outside-label {{ position: absolute; font-size: 8pt; color: #333; background: rgba(255,255,255,0.9); 
@@ -598,11 +606,10 @@ def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict,
         if not outside_labels:
             return "", ""
         
-        # ラベル配置: 上下交互、1つ目=上直近、2つ目=下直近、3つ目=上遠く、4つ目=下遠く...
-        top_labels_layer1 = []  # 直近（リード線なし）
-        top_labels_layer2 = []  # 遠く（リード線あり）
-        bottom_labels_layer1 = []  # 直近（リード線なし）
-        bottom_labels_layer2 = []  # 遠く（リード線あり）
+        # 動的多層配置: 上下交互に層を追加していく
+        from collections import defaultdict
+        top_layers = defaultdict(list)  # {layer_number: [(pos, text, option), ...]}
+        bottom_layers = defaultdict(list)
         
         for i, o in enumerate(outside_labels):
             # セグメント中央位置を計算
@@ -617,20 +624,23 @@ def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict,
             label_pct = round((counts.get(o, 0) / S) * 100.0, 1)
             label_text = f"{escape_html(o)} {label_pct}%"
             
-            # 配置ルール
-            if i == 0:  # 1つ目: 上直近
-                top_labels_layer1.append((center_pos, label_text, o))
-            elif i == 1:  # 2つ目: 下直近
-                bottom_labels_layer1.append((center_pos, label_text, o))
-            elif i % 2 == 0:  # 3つ目以降偶数: 上遠く
-                top_labels_layer2.append((center_pos, label_text, o))
-            else:  # 4つ目以降奇数: 下遠く
-                bottom_labels_layer2.append((center_pos, label_text, o))
+            # 新しい配置ルール: 上下交互に層を増やす
+            if i == 0:  # 1つ目: 上layer1（直近、リード線なし）
+                top_layers[1].append((center_pos, label_text, o))
+            elif i == 1:  # 2つ目: 下layer1（直近、リード線なし）
+                bottom_layers[1].append((center_pos, label_text, o))
+            elif i % 2 == 0:  # 3つ目以降偶数: 上側に配置
+                layer_num = (i // 2) + 1  # 3つ目→layer2, 5つ目→layer3, ...
+                top_layers[layer_num].append((center_pos, label_text, o))
+            else:  # 4つ目以降奇数: 下側に配置  
+                layer_num = (i // 2) + 1  # 4つ目→layer2, 6つ目→layer3, ...
+                bottom_layers[layer_num].append((center_pos, label_text, o))
         
-        # HTML生成
-        def render_label_layer(labels, layer_class, has_leader_line=False, line_direction=""):
+        # HTML生成：動的に層を構築
+        def render_label_layer(labels, layer_num, has_leader_line=False, line_direction=""):
             if not labels:
                 return ""
+            layer_class = f"label-layer-{layer_num}"
             layer_html = f'<div class="{layer_class}">'
             for pos, text, option in labels:
                 label_style = f"left:{pos:.2f}%; transform:translateX(-50%);"
@@ -641,17 +651,21 @@ def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict,
             layer_html += '</div>'
             return layer_html
         
+        # 上側の層を逆順で配置（遠い層から先に配置）
         top_html = ""
-        if top_labels_layer2:
-            top_html += render_label_layer(top_labels_layer2, "label-layer-2", True, "to-bottom")
-        if top_labels_layer1:
-            top_html += render_label_layer(top_labels_layer1, "label-layer-1")
+        max_top_layer = max(top_layers.keys()) if top_layers else 0
+        for layer_num in range(max_top_layer, 0, -1):  # 大きい層番号から小さい層番号へ
+            if layer_num in top_layers:
+                has_leader = (layer_num > 1)  # layer1のみリード線なし
+                top_html += render_label_layer(top_layers[layer_num], layer_num, has_leader, "to-bottom")
         
+        # 下側の層を正順で配置（近い層から先に配置）
         bottom_html = ""
-        if bottom_labels_layer1:
-            bottom_html += render_label_layer(bottom_labels_layer1, "label-layer-1")
-        if bottom_labels_layer2:
-            bottom_html += render_label_layer(bottom_labels_layer2, "label-layer-2", True, "to-top")
+        max_bottom_layer = max(bottom_layers.keys()) if bottom_layers else 0
+        for layer_num in range(1, max_bottom_layer + 1):  # 小さい層番号から大きい層番号へ
+            if layer_num in bottom_layers:
+                has_leader = (layer_num > 1)  # layer1のみリード線なし
+                bottom_html += render_label_layer(bottom_layers[layer_num], layer_num, has_leader, "to-top")
         
         top_container = f'<div class="outside-labels-top">{top_html}</div>' if top_html else ""
         bottom_container = f'<div class="outside-labels-bottom">{bottom_html}</div>' if bottom_html else ""
