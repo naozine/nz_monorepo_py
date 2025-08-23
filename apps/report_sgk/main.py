@@ -521,7 +521,7 @@ def order_options_by_overall(counts: dict, S_overall: int) -> list:
 
 # 1本の積み上げ棒HTMLを生成
 
-def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict) -> str:
+def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict, unit: str) -> str:
     S = sum(counts.values())
     if S == 0:
         return ""
@@ -537,17 +537,17 @@ def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict)
         style = f"left:{left:.6f}%;width:{w:.6f}%;background:{colors.get(o,'#999')};"
         segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{escape_html(o)} {label_pct}%\"><span class=\"seg-label\">{escape_html(o)} {label_pct}%</span></div>")
         left += w
-    s_text = f"S={S:,}選択"
+    s_text = f"{S:,}{unit}"
     return f"<div class=\"bar-row\"><div class=\"stacked-bar\">{''.join(segs)}</div><div class=\"bar-right\">{s_text}</div></div>"
 
 # グループごとの棒群HTML（見出し＋棒複数 or データなし）
 
-def render_group_bars(group_label: str, frames: list, qcol: str, order: list, colors: dict) -> str:
+def render_group_bars(group_label: str, frames: list, qcol: str, order: list, colors: dict, unit: str) -> str:
     bars = []
     for name, fr in frames:
         counts, S = aggregate_group(fr, qcol, order)
         if S > 0:
-            bars.append(f"<div><div class=\"q-subheading\">{escape_html(name)}</div>{render_stacked_bar(name, counts, order, colors)}</div>")
+            bars.append(f"<div><div class=\"q-subheading\">{escape_html(name)}</div>{render_stacked_bar(name, counts, order, colors, unit)}</div>")
     if not bars:
         return f"<div class=\"q-subheading\">{escape_html(group_label)}</div><div class=\"muted\">データなし</div>"
     # group_label as a heading, then stacked bars listed vertically without extra labels
@@ -556,7 +556,7 @@ def render_group_bars(group_label: str, frames: list, qcol: str, order: list, co
         counts, S = aggregate_group(fr, qcol, order)
         if S == 0:
             continue
-        bar_html = render_stacked_bar(name, counts, order, colors)
+        bar_html = render_stacked_bar(name, counts, order, colors, unit)
         inner.append(f"<div><div class=\"muted\" style=\"margin-bottom:1mm;\">{escape_html(name)}</div>{bar_html}</div>")
     return f"<div class=\"q-subheading\">{escape_html(group_label)}</div>" + "".join(inner)
 
@@ -620,22 +620,31 @@ for idx, q in enumerate(question_columns):
     # 色割当（設問内で固定）
     colors = color_map_for_options(order)
 
+    # 単一/複数の判定と単位・説明文
+    multi = is_multiselect(df_eff, q)
+    unit = "回中" if multi else "人中"
+    if multi:
+        explain_text = "以下のグラフの割合は、各区分の選択回数の合計を母数とし、合計は100%になります\n棒の右の数値は、その区分の合計回数です。"
+    else:
+        explain_text = "以下のグラフの割合は、各区分の回答者数を母数にしています。棒の右の数値は、その区分の合計人数です。"
+
     # 全体棒（他と同じネスト構造にして開始位置を揃える）
     overall_bar_html = ""
     if S_overall > 0:
-        overall_bar_html = f"<div>{render_stacked_bar('全体', overall_counts, order, colors)}</div>"
+        overall_bar_html = f"<div>{render_stacked_bar('全体', overall_counts, order, colors, unit)}</div>"
     else:
         overall_bar_html = "<div><div class=\"muted\">データなし</div></div>"
 
+    legend_html = render_legend(order, colors)
+    explain_html = f"<div class=\"muted\" style=\"margin:2mm 0 2mm; white-space: pre-wrap;\">{escape_html(explain_text)}</div>"
+
     # 地域別
     region_frames = [(lab, df_eff[df_eff["region_bucket"] == lab]) for lab in REGION_ORDER]
-    region_html = render_group_bars("地域別", region_frames, q, order, colors)
+    region_html = render_group_bars("地域別", region_frames, q, order, colors, unit)
 
     # 学年別
     grade_frames = [(lab, df_eff[df_eff["grade_2024"] == lab]) for lab in GRADE_ORDER]
-    grade_html = render_group_bars("学年別", grade_frames, q, order, colors)
-
-    legend_html = render_legend(order, colors)
+    grade_html = render_group_bars("学年別", grade_frames, q, order, colors, unit)
 
     section_html = f"""
     <section class=\"page-break\">
@@ -643,9 +652,10 @@ for idx, q in enumerate(question_columns):
       {note_box_html}
       <div class=\"q-subheading\">全体</div>
       {overall_bar_html}
+      {legend_html}
+      {explain_html}
       {region_html}
       {grade_html}
-      {legend_html}
     </section>
     """.strip()
     sections.append(section_html)
