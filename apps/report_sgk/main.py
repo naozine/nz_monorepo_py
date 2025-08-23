@@ -289,7 +289,7 @@ a4_css = f"""
   .bar > span {{ display: block; height: 100%; background: #4c8bf5; }}
   .bar.secondary > span {{ background: #f58b4c; }}
   .bar.other > span {{ background: #b5b5b5; }}
-  .legend {{ display: flex; gap: 6mm; flex-wrap: wrap; margin-top: 2mm; font-size: 8pt; color: #555; }}
+  .legend {{ display: flex; gap: 6mm; flex-wrap: wrap; margin-top: 2mm; font-size: 8pt; color: #555; padding-left: 6mm; }}
   .legend .item::before {{ content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }}
   .legend .male::before {{ background: #4c8bf5; }}
   .legend .female::before {{ background: #f58b4c; }}
@@ -341,8 +341,8 @@ a4_css = f"""
   .stacked-bar {{ flex: 1 1 auto; position: relative; height: 16px; border-radius: 8px; overflow: hidden; background: #f2f4f8; border: 1px solid #d0d7e2; }}
   .stacked-bar .seg {{ position: absolute; top: 0; bottom: 0; display: flex; align-items: center; white-space: nowrap; font-size: 9pt; color: #fff; padding: 0 4px; }}
   .stacked-bar .seg .seg-label {{ font-weight: 600; text-shadow: 0 1px 0 rgba(0,0,0,0.25); }}
-  .bar-right {{ flex: 0 0 auto; font-size: 9pt; color: #444; }}
-  .legend2 {{ display: flex; flex-wrap: wrap; gap: 5mm; font-size: 8pt; color: #555; margin: 1mm 0 2mm; }}
+  .bar-right {{ flex: 0 0 22mm; font-size: 9pt; color: #444; text-align: right; }}
+  .legend2 {{ display: flex; flex-wrap: wrap; gap: 5mm; font-size: 8pt; color: #555; margin: 1mm 0 2mm; padding-left: 6mm; }}
   .legend2 .item {{ display: inline-flex; align-items: center; gap: 4px; }}
   .legend2 .swatch {{ width: 10px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid rgba(0,0,0,0.05); }}
 """
