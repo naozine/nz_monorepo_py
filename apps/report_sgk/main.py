@@ -620,12 +620,12 @@ for idx, q in enumerate(question_columns):
     # 色割当（設問内で固定）
     colors = color_map_for_options(order)
 
-    # 全体棒
+    # 全体棒（他と同じネスト構造にして開始位置を揃える）
     overall_bar_html = ""
     if S_overall > 0:
-        overall_bar_html = render_stacked_bar("全体", overall_counts, order, colors)
+        overall_bar_html = f"<div>{render_stacked_bar('全体', overall_counts, order, colors)}</div>"
     else:
-        overall_bar_html = "<div class=\"muted\">データなし</div>"
+        overall_bar_html = "<div><div class=\"muted\">データなし</div></div>"
 
     # 地域別
     region_frames = [(lab, df_eff[df_eff["region_bucket"] == lab]) for lab in REGION_ORDER]
