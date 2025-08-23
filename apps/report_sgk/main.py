@@ -930,22 +930,31 @@ def render_legend(order: list[str], colors: dict) -> str:
 # rows: 先頭に「全体」、続いて各カテゴリ
 
 def render_option_count_table(sub_label: str, header_label: str, frames: list[tuple[str, pd.DataFrame]], qcol: str, options: list[str]) -> str:
-    # ヘッダー
-    head_cells = [escape_html(header_label)] + [escape_html(o) for o in options]
-    thead = "<thead><tr>" + "".join([f"<th>{c}</th>" for c in head_cells]) + "</tr></thead>"
+    # 列ヘッダー（転置版）: 選択肢 | 全体 | 各カテゴリ名
+    col_headers = ["選択肢", "全体"] + [escape_html(name) for name, _ in frames]
+    thead = "<thead><tr>" + "".join([f"<th>{h}</th>" for h in col_headers]) + "</tr></thead>"
 
-    # 本文行を作成するヘルパ
-    def row_html(label: str, frame: pd.DataFrame) -> str:
-        counts, S = aggregate_group(frame, qcol, options)
-        tds = [f"<td class=\"label\">{escape_html(label)}</td>"]
-        for o in options:
-            tds.append(f"<td>{fmt_int(counts.get(o, 0))}</td>")
-        return "<tr>" + "".join(tds) + "</tr>"
+    # 全体のフレーム（全カテゴリ結合）
+    all_frame = pd.concat([fr for _, fr in frames], axis=0) if frames else df_eff
+    overall_counts, _S_overall = aggregate_group(all_frame, qcol, options)
 
-    # 全体行 + 各カテゴリ行
-    body_rows = [row_html("全体", pd.concat([fr for _, fr in frames], axis=0) if frames else df_eff)]
+    # 各カテゴリの集計を事前計算
+    per_frame_counts = []  # [(name, counts_dict)]
     for name, fr in frames:
-        body_rows.append(row_html(name, fr))
+        counts, _S = aggregate_group(fr, qcol, options)
+        per_frame_counts.append((name, counts))
+
+    # 行: 各選択肢
+    body_rows = []
+    for o in options:
+        tds = [f"<td class=\"label\">{escape_html(o)}</td>"]
+        # 全体
+        tds.append(f"<td>{fmt_int(overall_counts.get(o, 0))}</td>")
+        # 各カテゴリ
+        for name, counts in per_frame_counts:
+            tds.append(f"<td>{fmt_int(counts.get(o, 0))}</td>")
+        body_rows.append("<tr>" + "".join(tds) + "</tr>")
+
     tbody = "<tbody>" + "".join(body_rows) + "</tbody>"
 
     return f"<div class=\"q-subheading\">{escape_html(sub_label)}</div><table class=\"simple\">{thead}{tbody}</table>"
