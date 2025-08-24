@@ -339,9 +339,11 @@ a4_css = f"""
 
   /* 選択肢×区分 割合バー */
   .option-pct td {{ vertical-align: middle; }}
-  .pct-bar {{ position: relative; height: 12px; background: #f2f4f8; border: 1px solid #d0d7e2; border-radius: 6px; overflow: hidden; }}
-  .pct-bar-fill {{ position: absolute; top: 0; left: 0; bottom: 0; background: #4c8bf5; }}
+  .pct-bar {{ position: relative; height: 12px; background: #f2f4f8; border: 1px solid #d0d7e2; border-radius: 6px; display: flex; align-items: center; }}
+  .pct-bar-fill {{ position: absolute; top: 0; left: 0; bottom: 0; background: #4c8bf5; display: flex; align-items: center; justify-content: flex-end; }}
   .pct-bar-label {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; text-shadow: 0 1px 0 rgba(255,255,255,0.6); }}
+  .pct-in-bar {{ font-size: 8pt; color: white; margin-right: 4px; text-shadow: 0 1px 0 rgba(0,0,0,0.3); }}
+  .pct-bar-right {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; white-space: nowrap; }}
 
   /* 固定カラム幅（全ての.simpleテーブルで列幅を揃える）*/
   table.simple th:nth-child(1), table.simple td:nth-child(1) {{ width: 28%; }}
@@ -1042,8 +1044,8 @@ def render_option_category_pct_table(sub_label: str, frames: list[tuple[str, pd.
             c_cell = (
                 f"<td>"
                 f"  <div class=\"pct-bar\">"
-                f"    <div class=\"pct-bar-fill\" style=\"width:{pct_val}%;background:{bar_color};\"></div>"
-                f"    <div class=\"pct-bar-label\">{pct_val}%</div>"
+                f"    <div class=\"pct-bar-fill\" style=\"width:{pct_val}%;background:{bar_color};\"><span class=\"pct-in-bar\">{pct_val}%</span></div>"
+                f"    <div class=\"pct-bar-right\">{num} / {denom} (人)</div>"
                 f"  </div>"
                 f"</td>"
             )
