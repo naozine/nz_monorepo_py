@@ -5,6 +5,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from pathlib import Path
+from dataclasses import dataclass, field
+from typing import Dict, List, Tuple, Optional
 
 # 簡易 .env ローダー（外部依存なし）
 # 優先順位: 既存の環境変数 > .env(CWD) > .env(リポジトリルート)
@@ -488,16 +490,36 @@ region_rows_html = "\n".join([
     for label in region_rows_order
 ])
 
+# Phase 3: 設定クラス（HTMLComponentsより前に定義する必要がある）
+@dataclass
+class ComponentConfig:
+    """コンポーネントの設定"""
+    min_segment_width_pct: float = 1.0
+    outside_label_threshold_pct: float = 24.0
+    outside_label_with_inner_pct_threshold: float = 5.0
+    chart_colors: List[str] = field(default_factory=lambda: [
+        "#4c8bf5", "#f58b4c", "#57b26a", "#9166cc", "#e04f5f",
+        "#39c0cf", "#f2c94c", "#7f8c8d", "#2ecc71", "#e67e22",
+        "#9b59b6", "#1abc9c", "#e84393", "#0984e3", "#6c5ce7"
+    ])
+    region_order: List[str] = field(default_factory=lambda: [
+        "東京23区", "三多摩島しょ", "埼玉県", "神奈川県", "千葉県", "その他"
+    ])
+    grade_order: List[str] = field(default_factory=lambda: [
+        "小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "中3"
+    ])
+
 # HTMLComponents基底クラス（Phase 1: 基底コンポーネント作成）
 class HTMLComponents:
-    def __init__(self, styles: str = ""):
+    def __init__(self, styles: str = "", config: Optional[ComponentConfig] = None):
         self.styles = styles
-        # 定数をインスタンス変数として管理
-        self.min_segment_width_pct = 1.0
-        self.outside_label_threshold_pct = 24.0
-        self.outside_label_with_inner_pct_threshold = 5.0
-        self.region_order = ["東京23区", "三多摩島しょ", "埼玉県", "神奈川県", "千葉県", "その他"]
-        self.grade_order = ["小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "中3"]
+        self.config = config or ComponentConfig()
+        # 設定から値を取得
+        self.min_segment_width_pct = self.config.min_segment_width_pct
+        self.outside_label_threshold_pct = self.config.outside_label_threshold_pct
+        self.outside_label_with_inner_pct_threshold = self.config.outside_label_with_inner_pct_threshold
+        self.region_order = self.config.region_order
+        self.grade_order = self.config.grade_order
 
     def escape_html(self, s: str) -> str:
         """最低限のエスケープ（選択肢や補足に <, >, & が含まれる場合に備える）"""
@@ -1060,19 +1082,256 @@ class DemographicsComponent(HTMLComponents):
         """
 
 
-# 特化コンポーネントのインスタンスを作成
-html_components = HTMLComponents(styles=a4_css)
-question_component = QuestionComponent(styles=a4_css)
-demographics_component = DemographicsComponent(styles=a4_css)
+@dataclass  
+class ReportConfig:
+    """レポート全体の設定"""
+    organizer: str = "サンプル主催者"
+    survey_name: str = "サンプルイベント名"
+    participating_schools: str = "参加校 100校"
+    venue: str = "サンプル会場 A"
+    event_dates: str = "9月1日（日）"
+    fiscal_year: int = 2024
+    
+    @classmethod
+    def from_env(cls) -> 'ReportConfig':
+        """環境変数から設定を読み込み"""
+        return cls(
+            organizer=os.getenv("REPORT_ORGANIZER", cls.organizer),
+            survey_name=os.getenv("REPORT_SURVEY_NAME", cls.survey_name),
+            participating_schools=os.getenv("REPORT_PARTICIPATING_SCHOOLS", cls.participating_schools),
+            venue=os.getenv("REPORT_VENUE", cls.venue),
+            event_dates=os.getenv("REPORT_EVENT_DATES", cls.event_dates),
+        )
 
-# HTML出力直前に設問一覧を取得してコンソール出力
-question_columns = get_question_columns(df)
+@dataclass
+class ProcessedData:
+    """処理済みデータの構造"""
+    df_original: pd.DataFrame
+    df_effective: pd.DataFrame
+    n_total: int
+    n_preschool: int
+    question_columns: List[str]
+    
+    # 性別・地域クロス集計データ
+    gender_crosstab: pd.DataFrame
+    gender_row_totals: pd.Series
+    gender_row_pct: pd.Series
+    gender_col_totals: pd.Series
+    region_crosstab: pd.DataFrame
+    region_row_totals: pd.Series
+    region_row_pct: pd.Series
+    region_col_totals: pd.Series
+    grand_total: int
+
+class ReportDataPreparator:
+    """レポート用データの前処理を担当"""
+    
+    def __init__(self, config: ReportConfig):
+        self.config = config
+        
+    def prepare_data(self, excel_path: Path) -> ProcessedData:
+        """Excelファイルからレポート用データを準備"""
+        # 1) 読み込み
+        df = pd.read_excel(excel_path, engine="openpyxl")
+        
+        # 2) 「回答」列の例外的な処理
+        df = self.map_answer_columns(df)
+        
+        # 3) 文字列のトリミング・NaN整備
+        df = self.clean_string_data(df)
+        
+        # 4) 生年月日を日時化
+        df["birth_dt"] = df["生年月日"].apply(self.parse_birth)
+        
+        # 5) 2024年度の「4/1時点学年」を算出
+        april1 = pd.Timestamp(f"{self.config.fiscal_year}-04-01")
+        df["grade_2024"] = df["birth_dt"].apply(lambda d: self.grade_ja_on_april1(d, april1))
+        df["age_2024"] = df["birth_dt"].apply(lambda d: self.age_on(d, april1))
+        
+        # 6) 未就学児除外
+        preschool_mask = (
+            (df["age_2024"].notna() & (df["age_2024"] < 6))
+            | (df["grade_2024"] == "不明")
+            | (df["grade_2024"] == "対象外")
+        )
+        n_preschool = int(preschool_mask.sum())
+        df_eff = df.loc[~preschool_mask].copy()
+        
+        # 7) 地域区分
+        df_eff["region_bucket"] = [self.region_bucket(p, c) for p, c in zip(df_eff.get("都道府県"), df_eff.get("市区町村"))]
+        
+        # 8) 複数回答の縦持ち化
+        col_channel = "本イベントを何でお知りになりましたか？（複数回答可）"
+        col_learning = "現在習い事や塾などに通われていますか？（複数回答可）"
+        if col_channel in df_eff.columns:
+            df_eff["channel_list"] = self.split_multiselect(df_eff[col_channel])
+        if col_learning in df_eff.columns:
+            df_eff["learning_list"] = self.split_multiselect(df_eff[col_learning])
+        
+        # 9) 性別正規化
+        if "性別" in df_eff.columns:
+            df_eff["gender_norm"] = df_eff["性別"].apply(self.normalize_gender)
+        else:
+            df_eff["gender_norm"] = "未回答・その他"
+            
+        # 10) 学校区分
+        df_eff["school_level"] = df_eff["grade_2024"].apply(self.school_level_from_grade)
+        
+        # 11) クロス集計データ準備
+        n_total = len(df_eff)
+        
+        # 男女 × 学校区分
+        rows_order = ["男性", "女性"]
+        cols_order = ["小学校", "中学校"]
+        ct = pd.crosstab(df_eff["gender_norm"], df_eff["school_level"])
+        ct = ct.reindex(index=rows_order, columns=cols_order, fill_value=0)
+        row_totals = ct.sum(axis=1)
+        col_totals = ct.sum(axis=0)
+        grand_total = int(ct.values.sum())
+        row_pct = row_totals.apply(lambda n: self.pct(int(n), grand_total)) if grand_total else row_totals.apply(lambda n: 0)
+        
+        # 地域別 × 学校区分
+        region_rows_order = ["東京23区", "三多摩島しょ", "埼玉県", "神奈川県", "千葉県", "その他"]
+        region_ct = pd.crosstab(df_eff["region_bucket"], df_eff["school_level"])
+        region_ct = region_ct.reindex(index=region_rows_order, columns=cols_order, fill_value=0)
+        region_row_totals = region_ct.sum(axis=1)
+        region_col_totals = region_ct.sum(axis=0)
+        region_row_pct = region_row_totals.apply(lambda n: self.pct(int(n), grand_total)) if grand_total else region_row_totals.apply(lambda n: 0)
+        
+        # 12) 設問一覧取得
+        question_columns = get_question_columns(df)
+        
+        return ProcessedData(
+            df_original=df,
+            df_effective=df_eff,
+            n_total=n_total,
+            n_preschool=n_preschool,
+            question_columns=question_columns,
+            gender_crosstab=ct,
+            gender_row_totals=row_totals,
+            gender_row_pct=row_pct,
+            gender_col_totals=col_totals,
+            region_crosstab=region_ct,
+            region_row_totals=region_row_totals,
+            region_row_pct=region_row_pct,
+            region_col_totals=region_col_totals,
+            grand_total=grand_total
+        )
+    
+    # 既存のヘルパーメソッドを移植
+    def map_answer_columns(self, frame: pd.DataFrame) -> pd.DataFrame:
+        cols = list(frame.columns)
+        new_names = list(cols)
+        for i, c in enumerate(cols):
+            if c == "回答" or re.match(r"^回答\.\d+$", str(c)):
+                if i == 0:
+                    continue
+                original_left = cols[i - 1]
+                new_names[i - 1] = f"補足説明{original_left}"
+                new_names[i] = original_left
+        rename_map = {old: new for old, new in zip(cols, new_names) if old != new}
+        return frame.rename(columns=rename_map)
+    
+    def clean_string_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        def strip_series(s: pd.Series) -> pd.Series:
+            return s.astype(str).str.replace(r"\u3000", " ", regex=True).str.strip().replace({"nan": np.nan})
+        for c in df.columns:
+            if df[c].dtype == object:
+                df[c] = strip_series(df[c])
+        return df
+    
+    def parse_birth(self, x):
+        if pd.isna(x): return pd.NaT
+        if isinstance(x, (int, float)) and not pd.isna(x):
+            s = str(int(x))
+            return pd.to_datetime(s, format="%Y%m%d", errors="coerce")
+        if isinstance(x, str) and re.fullmatch(r"\d{8}", x):
+            return pd.to_datetime(x, format="%Y%m%d", errors="coerce")
+        return pd.to_datetime(x, errors="coerce")
+    
+    def age_on(self, d, ref):
+        if pd.isna(d): return np.nan
+        return ref.year - d.year - ((ref.month, ref.day) < (d.month, d.day))
+    
+    def grade_ja_on_april1(self, birth_dt, april1):
+        a = self.age_on(birth_dt, april1)
+        if pd.isna(a): return "不明"
+        a = int(a)
+        mapping = {
+            6: "小1", 7: "小2", 8: "小3", 9: "小4", 10: "小5", 11: "小6",
+            12: "中1", 13: "中2", 14: "中3"
+        }
+        return mapping.get(a, "対象外")
+    
+    def region_bucket(self, pref, city):
+        tokyo_23 = {
+            "千代田区","中央区","港区","新宿区","文京区","台東区","墨田区","江東区","品川区","目黒区",
+            "大田区","世田谷区","渋谷区","中野区","杉並区","豊島区","北区","荒川区","板橋区","練馬区",
+            "足立区","葛飾区","江戸川区"
+        }
+        if pref == "東京都":
+            if isinstance(city, str) and any(city.startswith(ku) for ku in tokyo_23):
+                return "東京23区"
+            return "三多摩島しょ"
+        if pref == "埼玉県": return "埼玉県"
+        if pref == "神奈川県": return "神奈川県"
+        if pref == "千葉県": return "千葉県"
+        return "その他"
+    
+    def split_multiselect(self, series: pd.Series) -> pd.Series:
+        return (
+            series.fillna("")
+            .str.replace("\r\n", "\n")
+            .str.split(r"[\n]+", regex=True)
+            .apply(lambda xs: [x.strip() for x in xs if x and x.strip()])
+        )
+    
+    def normalize_gender(self, x: str) -> str:
+        if pd.isna(x) or str(x).strip() == "":
+            return "未回答・その他"
+        s = str(x)
+        if "男" in s:
+            return "男性"
+        if "女" in s:
+            return "女性"
+        return "未回答・その他"
+    
+    def school_level_from_grade(self, g: str) -> str:
+        if pd.isna(g):
+            return "不明"
+        g = str(g)
+        if g.startswith("小"):
+            return "小学校"
+        if g.startswith("中"):
+            return "中学校"
+        return "不明"
+    
+    def pct(self, n, d):
+        return 0 if d == 0 else round(n * 100.0 / d, 1)
+
+
+# Phase 3: 新しいデータ処理・設定管理を使用したメインコード
+
+# .env から設定を読み込み
+_load_env_from_dotenv()
+report_config = ReportConfig.from_env()
+component_config = ComponentConfig()
+
+# データ準備
+data_preparator = ReportDataPreparator(report_config)
+processed_data = data_preparator.prepare_data(Path(__file__).parent / "survey.xlsx")
+
+# コンポーネントのインスタンスを作成（設定を渡す）
+html_components = HTMLComponents(styles=a4_css, config=component_config)
+question_component = QuestionComponent(styles=a4_css, config=component_config)
+demographics_component = DemographicsComponent(styles=a4_css, config=component_config)
+
+# 設問一覧を出力
 print("設問一覧（候補）:")
-for q in question_columns:
+for q in processed_data.question_columns:
     print(f"- {q}")
 
-# 設問ごとの章（改ページあり）のHTMLを生成
-
+# 後方互換のためのヘルパー関数（既存コードが依存している）
 def first_non_empty_value(series: pd.Series):
     if series is None:
         return None
@@ -1085,45 +1344,15 @@ def first_non_empty_value(series: pd.Series):
     return None
 
 def escape_html(s: str) -> str:
-    # 最低限のエスケープ（選択肢や補足に <, >, & が含まれる場合に備える）
-    return (
-        str(s)
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
-
-# 補足説明の前処理（HTML埋め込み用）
-# 仕様:
-# - 入力テキストをまず escape_html で安全にエスケープ
-# - その後、全角の開き括弧「（」の直前に <span style="white-space: nowrap;"> を付与
-# - 全角の閉じ括弧「）」の直後に </span> を付与
-# 備考:
-# - 「（」「）」の数が一致しない場合、span が不均衡になる可能性がありますが、仕様通り付与します。
-# - この関数は安全な HTML 文字列を返すため、呼び出し側で追加のエスケープは不要です。
+    return html_components.escape_html(s)
 
 def preprocess_supplement_html(raw: str) -> str:
     if raw is None:
         return ""
     escaped = escape_html(raw)
-    # 「（」の前にノーブレーク用 span 開始タグを置く（文字自体は保持）
     escaped = escaped.replace("（", "<span style=\"white-space: nowrap;\">（")
-    # 「）」の後に span の終了タグを置く
     escaped = escaped.replace("）", "）</span>")
     return escaped
-
-# ---- 設問集計用ヘルパ ----
-REGION_ORDER = ["東京23区", "三多摩島しょ", "埼玉県", "神奈川県", "千葉県", "その他"]
-GRADE_ORDER = ["小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "中3"]
-
-# 積み上げ棒グラフ設定
-MIN_SEGMENT_WIDTH_PCT = 1.0  # セグメントの最小幅（％）
-OUTSIDE_LABEL_THRESHOLD_PCT = 24.0  # 外側ラベル表示閾値（％）
-OUTSIDE_LABEL_WITH_INNER_PCT_THRESHOLD = 5.0  # 外側ラベル+内側割合表示の閾値（％）
-
-# セルから一人分の選択肢セット（重複正規化済み）を取得
-# - 改行区切りを分割し、空を除去し、同一セル内重複を1つにする
-# - 返却は set
 
 def cell_to_unique_set(val) -> set:
     if pd.isna(val):
@@ -1143,16 +1372,12 @@ def cell_to_unique_set(val) -> set:
             uniq.append(t)
     return set(uniq)
 
-# 複数回答可の推定
-# - 見出しに「複数」などの語が含まれる場合は True
-# - それ以外でも、実データで1セル内に2つ以上の選択が存在する場合は True
-
 def is_multiselect(frame: pd.DataFrame, qcol: str) -> bool:
     name = str(qcol)
     if ("複数" in name) or ("複数回答" in name):
         return True
     series = frame[qcol].dropna()
-    for v in series.head(200):  # 全件でなくても傾向は分かる
+    for v in series.head(200):
         if len(cell_to_unique_set(v)) >= 2:
             return True
     return False
@@ -1632,28 +1857,36 @@ def render_option_category_pct_table(sub_label: str, frames: list[tuple[str, pd.
 
     return f"<div class=\"q-subheading\">{escape_html(sub_label)}</div><table class=\"simple option-pct region-pct\">{thead}{tbody}</table>"
 
-# 設問セクションを生成（新しいQuestionComponentを使用）
+# 設問セクションを生成（ProcessedDataを使用）
 sections = []
-for idx, q in enumerate(question_columns):
-    section_html = question_component.render_question_section(idx, q, df, df_eff, n_total)
+for idx, q in enumerate(processed_data.question_columns):
+    section_html = question_component.render_question_section(
+        idx, q, processed_data.df_original, processed_data.df_effective, processed_data.n_total
+    )
     sections.append(section_html)
 
 question_sections_html = "\n".join(sections)
 
-# 先頭ページの文言を環境変数から取得（.env で設定可能）
-organizer = os.getenv("REPORT_ORGANIZER", "サンプル主催者")
-survey_name = os.getenv("REPORT_SURVEY_NAME", "サンプルイベント名")
-participating_schools = os.getenv("REPORT_PARTICIPATING_SCHOOLS", "参加校 100校")
-venue = os.getenv("REPORT_VENUE", "サンプル会場 A")
-event_dates = os.getenv("REPORT_EVENT_DATES", "9月1日（日）")
-
-# 新しいDemographicsComponentを使用してHTML構築
+# 新しいDemographicsComponentを使用してHTML構築（ProcessedDataから取得）
 overview_html = demographics_component.render_overview_section(
-    organizer, survey_name, participating_schools, venue, event_dates, n_total, n_preschool
+    report_config.organizer, 
+    report_config.survey_name, 
+    report_config.participating_schools, 
+    report_config.venue, 
+    report_config.event_dates, 
+    processed_data.n_total, 
+    processed_data.n_preschool
 )
 demographics_html = demographics_component.render_demographics_section(
-    ct, row_totals, row_pct, col_totals, region_ct, region_row_totals, 
-    region_row_pct, region_col_totals, grand_total
+    processed_data.gender_crosstab, 
+    processed_data.gender_row_totals, 
+    processed_data.gender_row_pct, 
+    processed_data.gender_col_totals, 
+    processed_data.region_crosstab, 
+    processed_data.region_row_totals, 
+    processed_data.region_row_pct, 
+    processed_data.region_col_totals, 
+    processed_data.grand_total
 )
 
 html = f"""
@@ -1681,4 +1914,4 @@ html = f"""
 with open("report.html", "w", encoding="utf-8") as f:
     f.write(html)
 
-print(f"HTMLレポートを出力しました: report.html  （{n_total}件、未就学児{n_preschool}組を除く）")
+print(f"HTMLレポートを出力しました: report.html  （{processed_data.n_total}件、未就学児{processed_data.n_preschool}組を除く）")
