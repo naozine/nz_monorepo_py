@@ -488,6 +488,334 @@ region_rows_html = "\n".join([
     for label in region_rows_order
 ])
 
+# HTMLComponents基底クラス（Phase 1: 基底コンポーネント作成）
+class HTMLComponents:
+    def __init__(self, styles: str = ""):
+        self.styles = styles
+        # 定数をインスタンス変数として管理
+        self.min_segment_width_pct = 1.0
+        self.outside_label_threshold_pct = 24.0
+        self.outside_label_with_inner_pct_threshold = 5.0
+        self.region_order = ["東京23区", "三多摩島しょ", "埼玉県", "神奈川県", "千葉県", "その他"]
+        self.grade_order = ["小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "中3"]
+
+    def escape_html(self, s: str) -> str:
+        """最低限のエスケープ（選択肢や補足に <, >, & が含まれる場合に備える）"""
+        return (
+            str(s)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+
+    def render_stacked_bar(self, title: str, counts: dict, order: list[str], colors: dict, unit: str, show_total_right: bool = True) -> str:
+        """1本の積み上げ棒HTMLを生成"""
+        S = sum(counts.values())
+        if S == 0:
+            return ""
+        
+        # 1. 実際の割合を計算
+        actual_widths = {}
+        for o in order:
+            c = counts.get(o, 0)
+            if c > 0:
+                actual_widths[o] = (c / S) * 100.0
+        
+        # 2. 外側ラベル対象を判定
+        outside_labels = []
+        inside_segments = []
+        
+        for o in order:
+            if o not in actual_widths:
+                continue
+            actual_w = actual_widths[o]
+            if actual_w < self.outside_label_threshold_pct:
+                outside_labels.append(o)
+            else:
+                inside_segments.append(o)
+        
+        # 3. 最小幅保証の調整（内側ラベルのセグメントに対して）
+        adjusted_widths = {}
+        adjustment_needed = 0.0
+        
+        for o, actual_w in actual_widths.items():
+            if o in inside_segments and actual_w < self.min_segment_width_pct:
+                adjusted_widths[o] = self.min_segment_width_pct
+                adjustment_needed += self.min_segment_width_pct - actual_w
+            else:
+                adjusted_widths[o] = actual_w
+        
+        # 4. 最小幅保証により増えた分を、他のセグメントから比例配分で減らす
+        if adjustment_needed > 0:
+            reducible_total = sum(w for o, w in actual_widths.items() if w >= self.min_segment_width_pct)
+            
+            if reducible_total > 0:
+                reduction_ratio = adjustment_needed / reducible_total
+                for o in adjusted_widths:
+                    if actual_widths[o] >= self.min_segment_width_pct:
+                        adjusted_widths[o] = actual_widths[o] * (1 - reduction_ratio)
+        
+        # 5. 外側ラベル配置の計算（新しいFlexbox風アルゴリズム）
+        def calculate_outside_labels_html():
+            if not outside_labels:
+                return "", ""
+            
+            # 各外側ラベルの基本情報を集める
+            label_data = []
+            for o in outside_labels:
+                # セグメント中央位置を計算
+                left_pos = 0.0
+                for prev_o in order:
+                    if prev_o == o:
+                        break
+                    if prev_o in adjusted_widths:
+                        left_pos += adjusted_widths[prev_o]
+                
+                center_pos = left_pos + (adjusted_widths.get(o, 0) / 2)
+                label_pct = round((counts.get(o, 0) / S) * 100.0, 1)
+                
+                # 外側ラベルの表示内容を判定
+                if label_pct >= self.outside_label_with_inner_pct_threshold:
+                    # 5%以上: 外側は選択肢名のみ、内側に割合表示
+                    label_text = f"{self.escape_html(o)}"
+                else:
+                    # 5%未満: 外側に選択肢名+割合表示
+                    label_text = f"{self.escape_html(o)} {label_pct}%"
+                
+                label_data.append((center_pos, label_text, o))
+            
+            # Flexbox風配置で位置調整
+            adjusted_label_data = calculate_flexbox_positions(label_data, 100.0)
+            
+            # 調整後の配置で層分けを実行
+            # 可能な限り同じ高さ（layer1）に配置し、重なりがある場合のみ分散
+            from collections import defaultdict
+            top_layers = defaultdict(list)
+            bottom_layers = defaultdict(list)
+            
+            # まずは全て上layer1に配置を試行
+            for i, (pos, text, option) in enumerate(adjusted_label_data):
+                if i < len(adjusted_label_data) // 2:  # 前半は上側
+                    top_layers[1].append((pos, text, option))
+                else:  # 後半は下側
+                    bottom_layers[1].append((pos, text, option))
+            
+            # HTML生成：動的に層を構築
+            def render_label_layer(labels, layer_num, has_leader_line=False, line_direction=""):
+                if not labels:
+                    return ""
+                layer_class = f"label-layer-{layer_num}"
+                layer_html = f'<div class="{layer_class}">'
+                for pos, text, option in labels:
+                    label_style = f"left:{pos:.2f}%; transform:translateX(-50%);"
+                    layer_html += f'<div class="outside-label" style="{label_style}">{text}</div>'
+                    if has_leader_line:
+                        line_style = f"left:{pos:.2f}%; height:100%;"
+                        layer_html += f'<div class="leader-line {line_direction}" style="{line_style}"></div>'
+                layer_html += '</div>'
+                return layer_html
+            
+            # 上側の層を逆順で配置（遠い層から先に配置）
+            top_html = ""
+            max_top_layer = max(top_layers.keys()) if top_layers else 0
+            for layer_num in range(max_top_layer, 0, -1):  # 大きい層番号から小さい層番号へ
+                if layer_num in top_layers:
+                    has_leader = (layer_num > 1)  # layer1のみリード線なし
+                    top_html += render_label_layer(top_layers[layer_num], layer_num, has_leader, "to-bottom")
+            
+            # 下側の層を正順で配置（近い層から先に配置）
+            bottom_html = ""
+            max_bottom_layer = max(bottom_layers.keys()) if bottom_layers else 0
+            for layer_num in range(1, max_bottom_layer + 1):  # 小さい層番号から大きい層番号へ
+                if layer_num in bottom_layers:
+                    has_leader = (layer_num > 1)  # layer1のみリード線なし
+                    bottom_html += render_label_layer(bottom_layers[layer_num], layer_num, has_leader, "to-top")
+            
+            top_container = f'<div class="outside-labels-top">{top_html}</div>' if top_html else ""
+            bottom_container = f'<div class="outside-labels-bottom">{bottom_html}</div>' if bottom_html else ""
+            
+            return top_container, bottom_container
+        
+        top_labels_html, bottom_labels_html = calculate_outside_labels_html()
+        
+        # 6. セグメントHTML生成（内側ラベルのみ）
+        left = 0.0
+        segs = []
+        for o in order:
+            if o not in adjusted_widths:
+                continue
+            
+            c = counts.get(o, 0)
+            w = adjusted_widths[o]
+            label_pct = round((c / S) * 100.0, 1)
+            
+            style = f"left:{left:.6f}%;width:{w:.6f}%;background:{colors.get(o,'#999')};"
+            
+            # 内側ラベル表示判定
+            if o in inside_segments:
+                # 内側セグメント: 選択肢名+割合表示（従来通り）
+                segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {label_pct}%\"><span class=\"seg-label\">{self.escape_html(o)} {label_pct}%</span></div>")
+            else:
+                # 外側ラベル対象
+                if label_pct >= self.outside_label_with_inner_pct_threshold:
+                    # 10%以上: 棒内部に割合のみ表示
+                    segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {label_pct}%\"><span class=\"seg-label\">{label_pct}%</span></div>")
+                else:
+                    # 10%未満: 棒内部にラベル非表示
+                    segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {label_pct}%\"></div>")
+            
+            left += w
+        
+        s_text = f"{S:,}{unit}"
+        
+        # 7. 最終HTML構造
+        if outside_labels:
+            right_html = f'<div class="bar-right">{s_text}</div>' if show_total_right else ''
+            return f"""<div class="bar-container">
+  <div class="bar-content">
+    {top_labels_html}
+    <div class="stacked-bar">{''.join(segs)}</div>
+    {bottom_labels_html}
+  </div>
+  {right_html}
+</div>"""
+        else:
+            # 外側ラベルがない場合は従来通り
+            if show_total_right:
+                return f'<div class="bar-row"><div class="stacked-bar">{"".join(segs)}</div><div class="bar-right">{s_text}</div></div>'
+            else:
+                return f'<div class="bar-row"><div class="stacked-bar">{"".join(segs)}</div></div>'
+
+    def render_group_bars(self, group_label: str, frames: list, qcol: str, order: list, colors: dict, unit: str) -> str:
+        """グループごとの棒群HTML（見出し＋棒複数 or データなし）"""
+        bars = []
+        for name, fr in frames:
+            counts, S = aggregate_group(fr, qcol, order)
+            if S > 0:
+                bars.append(f"<div><div class=\"q-subheading\">{self.escape_html(name)}</div>{self.render_stacked_bar(name, counts, order, colors, unit)}</div>")
+        if not bars:
+            return f"<div class=\"q-subheading\">{self.escape_html(group_label)}</div><div class=\"muted\">データなし</div>"
+        # group_label as a heading, then stacked bars listed vertically
+        inner = []
+        # 単位から表示サフィックス（人/回）を決定
+        suffix = "回" if unit.endswith("回中") else "人"
+        for name, fr in frames:
+            counts, S = aggregate_group(fr, qcol, order)
+            if S == 0:
+                continue
+            bar_html = self.render_stacked_bar(name, counts, order, colors, unit, show_total_right=False)
+            label_text = f"{self.escape_html(name)} = {S:,}{suffix}"
+            inner.append(f"<div><div class=\"muted\" style=\"margin-bottom:0.3mm;\">{label_text}</div>{bar_html}</div>")
+        return f"<div class=\"q-subheading\">{self.escape_html(group_label)}</div>" + "".join(inner)
+
+    def render_legend(self, order: list[str], colors: dict) -> str:
+        """伝説（凡例）"""
+        items = []
+        for o in order:
+            items.append(f"<span class=\"item\"><span class=\"swatch\" style=\"background:{colors.get(o,'#999')}\"></span>{self.escape_html(o)}</span>")
+        return f"<div class=\"legend2\">{''.join(items)}</div>"
+
+    def render_option_count_table(self, sub_label: str, header_label: str, frames: list[tuple[str, pd.DataFrame]], qcol: str, options: list[str], df_eff_param: pd.DataFrame, n_total_param: int) -> str:
+        """指定したフレーム群に対して、選択肢ごとのカウント表を生成"""
+        # 列ヘッダー（転置版）: 選択肢 | 全体 | 各カテゴリ名
+        col_headers = ["選択肢", "全体"] + [self.escape_html(name) for name, _ in frames]
+        thead = "<thead><tr>" + "".join([f"<th>{h}</th>" for h in col_headers]) + "</tr></thead>"
+
+        # 全体のフレーム（全カテゴリ結合）
+        all_frame = pd.concat([fr for _, fr in frames], axis=0) if frames else df_eff_param
+        overall_counts, _S_overall = aggregate_group(all_frame, qcol, options)
+        # 分母（回答者数）: 設問によらず、全体は n_total、各カテゴリは len(fr)
+        overall_denom = n_total_param
+
+        # 各カテゴリの集計を事前計算
+        per_frame_counts = []  # [(name, counts_dict, denom)]
+        for name, fr in frames:
+            counts, _S = aggregate_group(fr, qcol, options)
+            denom = len(fr)
+            per_frame_counts.append((name, counts, denom))
+
+        # 行: 各選択肢
+        body_rows = []
+        for o in options:
+            tds = [f"<td class=\"label\">{self.escape_html(o)}</td>"]
+            # 全体（分母: 回答者数）
+            ov_num = overall_counts.get(o, 0)
+            ov_pct = 0 if overall_denom == 0 else round(ov_num * 100.0 / overall_denom, 1)
+            tds.append(f"<td>{fmt_int(ov_num)}<div class=\"muted\" style=\"font-size:8pt;\">{ov_pct}%</div></td>")
+            # 各カテゴリ（分母: そのカテゴリの回答者数）
+            for name, counts, denom in per_frame_counts:
+                num = counts.get(o, 0)
+                pct_val = 0 if denom == 0 else round(num * 100.0 / denom, 1)
+                tds.append(f"<td>{fmt_int(num)}<div class=\"muted\" style=\"font-size:8pt;\">{pct_val}%</div></td>")
+            body_rows.append("<tr>" + "".join(tds) + "</tr>")
+
+        tbody = "<tbody>" + "".join(body_rows) + "</tbody>"
+
+        return f"<div class=\"q-subheading\">{self.escape_html(sub_label)}</div><table class=\"simple\">{thead}{tbody}</table>"
+
+    def render_option_category_pct_table(self, sub_label: str, frames: list[tuple[str, pd.DataFrame]], qcol: str, options: list[str], colors: dict) -> str:
+        """選択肢ごと × 区分ごとの割合を横棒で示すテーブル（A/B/Cレイアウト風）"""
+        if not frames or not options:
+            return ""
+
+        # ヘッダ
+        thead = (
+            "<thead><tr>"
+            "<th style=\"width: 50px; writing-mode: vertical-rl;\">選択肢</th>"
+            "<th>区分（人数）</th>"
+            "<th>割合</th>"
+            "</tr></thead>"
+        )
+
+        # 事前計算（各区分の分母）
+        frame_denoms = [(name, len(fr)) for name, fr in frames]
+        # 各区分ごとの選択肢カウント
+        per_frame_counts = []  # (name, counts)
+        for name, fr in frames:
+            counts, _S = aggregate_group(fr, qcol, options)
+            per_frame_counts.append((name, counts))
+
+        # name -> (counts, denom) lookup
+        counts_map = {name: counts for name, counts in per_frame_counts}
+        denom_map = {name: denom for name, denom in frame_denoms}
+
+        # 行生成
+        body_rows = []
+        for o in options:
+            first = True
+            # 表示対象の行数（全区分を表示。必要なら0件も表示）
+            for name, _ in frames:
+                denom = denom_map.get(name, 0)
+                num = counts_map.get(name, {}).get(o, 0)
+                pct_val = 0 if denom == 0 else round(num * 100.0 / denom, 1)
+                # A列
+                if first:
+                    a_cell = f"<td class=\"label\" rowspan=\"{len(frames)}\" style=\"writing-mode: vertical-rl; width: 50px; text-align: center;\">{self.escape_html(o)}</td>"
+                    first = False
+                else:
+                    a_cell = ""
+                # B列（区分名）
+                b_text = f"{self.escape_html(name)}"
+                b_cell = f"<td>{b_text}</td>"
+                # C列（横棒）
+                bar_color = colors.get(o, "#4c8bf5")
+                c_cell = (
+                    f"<td>"
+                    f"  <div class=\"pct-bar\">"
+                    f"    <div class=\"pct-bar-fill\" style=\"width:{pct_val}%;background:{bar_color};\"><span class=\"pct-in-bar\">{pct_val}%</span></div>"
+                    f"    <div class=\"pct-bar-right\">{num} / {denom} (人)</div>"
+                    f"  </div>"
+                    f"</td>"
+                )
+                body_rows.append("<tr>" + a_cell + b_cell + c_cell + "</tr>")
+
+        tbody = "<tbody>" + "".join(body_rows) + "</tbody>"
+
+        return f"<div class=\"q-subheading\">{self.escape_html(sub_label)}</div><table class=\"simple option-pct region-pct\">{thead}{tbody}</table>"
+
+# HTMLComponentsインスタンスを作成
+html_components = HTMLComponents(styles=a4_css)
+
 # HTML出力直前に設問一覧を取得してコンソール出力
 question_columns = get_question_columns(df)
 print("設問一覧（候補）:")
@@ -1083,7 +1411,7 @@ for idx, q in enumerate(question_columns):
         items = []
         for i, opt in enumerate(opts):
             label = alpha_label(i)
-            items.append(f"<span class=\"option-item\">【{label}】{escape_html(opt)}</span>")
+            items.append(f"<span class=\"option-item\">【{label}】{html_components.escape_html(opt)}</span>")
         options_html = f"<div class=\"options\">{''.join(items)}</div>"
 
     note_box_html = f"<div class=\"note-box\">{inner_sup}<h3>選択肢</h3>{options_html}</div>"
@@ -1121,29 +1449,29 @@ for idx, q in enumerate(question_columns):
         # 全体も他のサブセクションと同様にラベルに合計を表示し、右側の合計は非表示
         overall_suffix = "回" if unit.endswith("回中") else "人"
         overall_label = f"全体 = {S_overall:,}{overall_suffix}"
-        overall_bar_html = f"<div><div class=\"muted\" style=\"margin-bottom:0.3mm;\">{overall_label}</div>{render_stacked_bar('全体', overall_counts, order, colors, unit, show_total_right=False)}</div>"
+        overall_bar_html = f"<div><div class=\"muted\" style=\"margin-bottom:0.3mm;\">{overall_label}</div>{html_components.render_stacked_bar('全体', overall_counts, order, colors, unit, show_total_right=False)}</div>"
     else:
         overall_bar_html = "<div><div class=\"muted\">データなし</div></div>"
 
-    legend_html = render_legend(order, colors)
-    explain_html = f"<div class=\"muted\" style=\"margin:2mm 0 2mm; white-space: pre-wrap;\">{escape_html(explain_text)}</div>"
+    legend_html = html_components.render_legend(order, colors)
+    explain_html = f"<div class=\"muted\" style=\"margin:2mm 0 2mm; white-space: pre-wrap;\">{html_components.escape_html(explain_text)}</div>"
 
     # 地域別
-    region_frames = [(lab, df_eff[df_eff["region_bucket"] == lab]) for lab in REGION_ORDER]
-    region_html = render_group_bars("地域別", region_frames, q, order, colors, unit)
+    region_frames = [(lab, df_eff[df_eff["region_bucket"] == lab]) for lab in html_components.region_order]
+    region_html = html_components.render_group_bars("地域別", region_frames, q, order, colors, unit)
 
     # 学年別
-    grade_frames = [(lab, df_eff[df_eff["grade_2024"] == lab]) for lab in GRADE_ORDER]
-    grade_html = render_group_bars("学年別", grade_frames, q, order, colors, unit)
+    grade_frames = [(lab, df_eff[df_eff["grade_2024"] == lab]) for lab in html_components.grade_order]
+    grade_html = html_components.render_group_bars("学年別", grade_frames, q, order, colors, unit)
 
     # テーブル（角丸矩形の直下に配置）
-    region_pct_table_html = render_option_category_pct_table("地域別（選択肢×地域の割合）", region_frames, q, order, colors)
-    region_table_html = render_option_count_table("地域別", "地域", region_frames, q, order)
-    grade_table_html = render_option_count_table("学年別", "学年", grade_frames, q, order)
+    region_pct_table_html = html_components.render_option_category_pct_table("地域別（選択肢×地域の割合）", region_frames, q, order, colors)
+    region_table_html = html_components.render_option_count_table("地域別", "地域", region_frames, q, order, df_eff, n_total)
+    grade_table_html = html_components.render_option_count_table("学年別", "学年", grade_frames, q, order, df_eff, n_total)
 
     section_html = f"""
     <section class=\"page-break\">
-      <h2>Q{idx+1} {escape_html(q)}</h2>
+      <h2>Q{idx+1} {html_components.escape_html(q)}</h2>
       {note_box_html}
       {region_pct_table_html}
       {region_table_html}
