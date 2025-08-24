@@ -355,7 +355,7 @@ a4_css = f"""
   table.simple.region-pct th:nth-child(1), 
   table.simple.region-pct td:nth-child(1) {{ width: 50px; min-width: 50px; max-width: 50px; }}
   table.simple.region-pct th:nth-child(2),
-  table.simple.region-pct td:nth-child(2) {{ width: auto; min-width: 120px; }}
+  table.simple.region-pct td:nth-child(2) {{ width: 75px; min-width: 75px; max-width: 75px; }}
   table.simple.region-pct th:nth-child(3),
   table.simple.region-pct td:nth-child(3) {{ width: auto; }}
   
