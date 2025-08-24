@@ -350,6 +350,20 @@ a4_css = f"""
   table.simple th:nth-child(4), table.simple td:nth-child(4) {{ width: 18%; }}
   table.simple th:nth-child(5), table.simple td:nth-child(5) {{ width: 18%; }}
 
+  /* 地域別（選択肢×地域の割合）テーブルの特別スタイル */
+  table.simple.region-pct {{ table-layout: fixed; }}
+  table.simple.region-pct th:nth-child(1), 
+  table.simple.region-pct td:nth-child(1) {{ width: 50px; min-width: 50px; max-width: 50px; }}
+  table.simple.region-pct th:nth-child(2),
+  table.simple.region-pct td:nth-child(2) {{ width: auto; min-width: 120px; }}
+  table.simple.region-pct th:nth-child(3),
+  table.simple.region-pct td:nth-child(3) {{ width: auto; }}
+  
+  /* テーブル全体の高さを区分（人数）列の高さに制限 */
+  table.simple.region-pct {{ height: auto; overflow: hidden; }}
+  table.simple.region-pct tbody {{ height: auto; }}
+  table.simple.region-pct tr {{ height: auto; }}
+
   /* 概要レイアウト */
   .overview-list {{ display: grid; grid-template-columns: 38mm 1fr; column-gap: 6mm; row-gap: 2mm; font-size: 10pt; }}
   .overview-list .label {{ color: #555; }}
@@ -984,7 +998,7 @@ def render_option_category_pct_table(sub_label: str, frames: list[tuple[str, pd.
     # ヘッダ
     thead = (
         "<thead><tr>"
-        "<th>選択肢</th>"
+        "<th style=\"width: 50px; writing-mode: vertical-rl;\">選択肢</th>"
         "<th>区分（人数）</th>"
         "<th>割合</th>"
         "</tr></thead>"
@@ -1013,7 +1027,7 @@ def render_option_category_pct_table(sub_label: str, frames: list[tuple[str, pd.
             pct_val = 0 if denom == 0 else round(num * 100.0 / denom, 1)
             # A列
             if first:
-                a_cell = f"<td class=\"label\" rowspan=\"{len(frames)}\">{escape_html(o)}</td>"
+                a_cell = f"<td class=\"label\" rowspan=\"{len(frames)}\" style=\"writing-mode: vertical-rl; width: 50px; text-align: center;\">{escape_html(o)}</td>"
                 first = False
             else:
                 a_cell = ""
@@ -1034,7 +1048,7 @@ def render_option_category_pct_table(sub_label: str, frames: list[tuple[str, pd.
 
     tbody = "<tbody>" + "".join(body_rows) + "</tbody>"
 
-    return f"<div class=\"q-subheading\">{escape_html(sub_label)}</div><table class=\"simple option-pct\">{thead}{tbody}</table>"
+    return f"<div class=\"q-subheading\">{escape_html(sub_label)}</div><table class=\"simple option-pct region-pct\">{thead}{tbody}</table>"
 
 sections = []
 for idx, q in enumerate(question_columns):
