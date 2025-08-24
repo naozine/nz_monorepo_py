@@ -346,11 +346,18 @@ a4_css = f"""
   .option-pct td {{ vertical-align: middle; }}
   .option-pct .option-text {{ width: 80px; writing-mode: vertical-rl; text-align: center; line-height: 1.3; padding: 4px 2px; word-break: keep-all; vertical-align: middle; }}
   .pct-bar {{ position: relative; height: 12px; background: #f2f4f8; border: 1px solid #d0d7e2; border-radius: 6px; display: flex; align-items: center; }}
+  /* 地域別（選択肢×地域の割合）テーブルの棒グラフを細く */
+  table.simple.region-pct .pct-bar {{ height: 6px; border-radius: 3px; }}
   .pct-bar-fill {{ position: absolute; top: 0; left: 0; bottom: 0; background: #4c8bf5; display: flex; align-items: center; justify-content: flex-end; }}
   .pct-bar-label {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; text-shadow: 0 1px 0 rgba(255,255,255,0.6); }}
   .pct-in-bar {{ font-size: 8pt; color: white; margin-right: 4px; text-shadow: 0 1px 0 rgba(0,0,0,0.3); }}
+  /* 地域別（選択肢×地域の割合）テーブルのパーセンテージ表示を小さく */
+  table.simple.region-pct .pct-in-bar {{ font-size: 6pt; margin-right: 2px; }}
+  table.simple.region-pct .pct-external {{ font-size: 6pt; }}
   .pct-external {{ position: absolute; font-size: 8pt; color: #333; white-space: nowrap; top: 50%; transform: translateY(-50%); z-index: 10; }}
   .pct-bar-right {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; white-space: nowrap; }}
+  /* 地域別（選択肢×地域の割合）テーブルの人数表示も小さく */
+  table.simple.region-pct .pct-bar-right {{ font-size: 6pt; right: 4px; }}
 
   /* 固定カラム幅（全ての.simpleテーブルで列幅を揃える）*/
   table.simple th:nth-child(1), table.simple td:nth-child(1) {{ width: 28%; }}
@@ -365,13 +372,13 @@ a4_css = f"""
   table.simple.region-pct td:nth-child(1) {{ width: 50px; min-width: 50px; max-width: 50px; }}
   table.simple.region-pct th:nth-child(2),
   table.simple.region-pct td:nth-child(2),
-  table.simple.region-pct td:nth-child(1):not(.option-text) {{ width: 90px; min-width: 90px; max-width: 90px; font-size: 8pt; }}
+  table.simple.region-pct td:nth-child(1):not(.option-text) {{ width: 90px; min-width: 90px; max-width: 90px; font-size: 5pt; }}
   table.simple.region-pct th:nth-child(3),
   table.simple.region-pct td:nth-child(3) {{ width: auto; }}
   /* 地域別（選択肢×地域の割合）テーブルの行間を狭く */
-  table.simple.region-pct td {{ padding: 0px 8px; line-height: 1.0; height: 12px; vertical-align: middle; }}
-  table.simple.region-pct tr {{ height: 12px; }}
-  table.simple.region-pct {{ border-spacing: 0; border-collapse: collapse; }}
+  table.simple.region-pct td {{ padding: 0px 6px; line-height: 1.0; height: 10px; vertical-align: middle; font-size: 7pt; }}
+  table.simple.region-pct tr {{ height: 10px; }}
+  table.simple.region-pct {{ border-spacing: 0; border-collapse: collapse; font-size: 7pt; }}
   
   /* option-pctテーブルの行間を狭く */
   table.simple.option-pct td {{ padding: 3px 8px; }}
@@ -1550,11 +1557,18 @@ class ReportGenerator:
   .option-pct td {{ vertical-align: middle; }}
   .option-pct .option-text {{ width: 80px; writing-mode: vertical-rl; text-align: center; line-height: 1.3; padding: 4px 2px; word-break: keep-all; vertical-align: middle; }}
   .pct-bar {{ position: relative; height: 12px; background: #f2f4f8; border: 1px solid #d0d7e2; border-radius: 6px; display: flex; align-items: center; }}
+  /* 地域別（選択肢×地域の割合）テーブルの棒グラフを細く */
+  table.simple.region-pct .pct-bar {{ height: 6px; border-radius: 3px; }}
   .pct-bar-fill {{ position: absolute; top: 0; left: 0; bottom: 0; background: #4c8bf5; display: flex; align-items: center; justify-content: flex-end; }}
   .pct-bar-label {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; text-shadow: 0 1px 0 rgba(255,255,255,0.6); }}
   .pct-in-bar {{ font-size: 8pt; color: white; margin-right: 4px; text-shadow: 0 1px 0 rgba(0,0,0,0.3); }}
+  /* 地域別（選択肢×地域の割合）テーブルのパーセンテージ表示を小さく */
+  table.simple.region-pct .pct-in-bar {{ font-size: 6pt; margin-right: 2px; }}
+  table.simple.region-pct .pct-external {{ font-size: 6pt; }}
   .pct-external {{ position: absolute; font-size: 8pt; color: #333; white-space: nowrap; top: 50%; transform: translateY(-50%); z-index: 10; }}
   .pct-bar-right {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; white-space: nowrap; }}
+  /* 地域別（選択肢×地域の割合）テーブルの人数表示も小さく */
+  table.simple.region-pct .pct-bar-right {{ font-size: 6pt; right: 4px; }}
   table.simple th:nth-child(1), table.simple td:nth-child(1) {{ width: 28%; }}
   table.simple th:nth-child(2), table.simple td:nth-child(2) {{ width: 18%; }}
   table.simple th:nth-child(3), table.simple td:nth-child(3) {{ width: 18%; }}
@@ -1565,13 +1579,13 @@ class ReportGenerator:
   table.simple.region-pct td:nth-child(1) {{ width: 50px; min-width: 50px; max-width: 50px; }}
   table.simple.region-pct th:nth-child(2),
   table.simple.region-pct td:nth-child(2),
-  table.simple.region-pct td:nth-child(1):not(.option-text) {{ width: 90px; min-width: 90px; max-width: 90px; font-size: 8pt; }}
+  table.simple.region-pct td:nth-child(1):not(.option-text) {{ width: 90px; min-width: 90px; max-width: 90px; font-size: 5pt; }}
   table.simple.region-pct th:nth-child(3),
   table.simple.region-pct td:nth-child(3) {{ width: auto; }}
   /* 地域別（選択肢×地域の割合）テーブルの行間を狭く */
-  table.simple.region-pct td {{ padding: 0px 8px; line-height: 1.0; height: 12px; vertical-align: middle; }}
-  table.simple.region-pct tr {{ height: 12px; }}
-  table.simple.region-pct {{ border-spacing: 0; border-collapse: collapse; }}
+  table.simple.region-pct td {{ padding: 0px 6px; line-height: 1.0; height: 10px; vertical-align: middle; font-size: 7pt; }}
+  table.simple.region-pct tr {{ height: 10px; }}
+  table.simple.region-pct {{ border-spacing: 0; border-collapse: collapse; font-size: 7pt; }}
   table.simple.option-pct td {{ padding: 3px 8px; }}
   table.simple.region-pct {{ height: auto; overflow: hidden; }}
   table.simple.region-pct tbody {{ height: auto; }}
