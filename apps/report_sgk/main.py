@@ -1022,16 +1022,18 @@ class QuestionComponent(HTMLComponents):
         
         # テーブル
         region_pct_table_html = self.render_option_category_pct_table("地域別（選択肢×地域の割合）", region_frames, q, order, colors)
+        grade_pct_table_html = self.render_option_category_pct_table("地域別（選択肢×学年の割合）", grade_frames, q, order, colors)
         region_table_html = self.render_option_count_table("地域別", "地域", region_frames, q, order, df_eff_param, n_total_param)
         grade_table_html = self.render_option_count_table("学年別", "学年", grade_frames, q, order, df_eff_param, n_total_param)
         
         return f"""
         {region_pct_table_html}
+        {grade_pct_table_html}
         {region_table_html}
         {grade_table_html}
         {legend_html}
         {explain_html}
-        <div class="q-subheading">全体</div>
+        <div class=\"q-subheading\">全体</div>
         {overall_bar_html}
         {region_html}
         {grade_html}
