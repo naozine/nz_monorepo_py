@@ -344,6 +344,7 @@ a4_css = f"""
 
   /* 選択肢×区分 割合バー */
   .option-pct td {{ vertical-align: middle; }}
+  .option-pct .option-text {{ width: 80px; writing-mode: vertical-rl; text-align: center; line-height: 1.3; padding: 4px 2px; word-break: keep-all; vertical-align: middle; }}
   .pct-bar {{ position: relative; height: 12px; background: #f2f4f8; border: 1px solid #d0d7e2; border-radius: 6px; display: flex; align-items: center; }}
   .pct-bar-fill {{ position: absolute; top: 0; left: 0; bottom: 0; background: #4c8bf5; display: flex; align-items: center; justify-content: flex-end; }}
   .pct-bar-label {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; text-shadow: 0 1px 0 rgba(255,255,255,0.6); }}
@@ -511,6 +512,8 @@ class ComponentConfig:
     grade_order: List[str] = field(default_factory=lambda: [
         "小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "中3"
     ])
+    # 長い選択肢テキストの改行設定
+    max_option_text_length: int = 12
 
 # HTMLComponents基底クラス（Phase 1: 基底コンポーネント作成）
 class HTMLComponents:
@@ -532,6 +535,82 @@ class HTMLComponents:
             .replace("<", "&lt;")
             .replace(">", "&gt;")
         )
+    
+    def split_long_option_text(self, text: str, max_length: int = 12) -> str:
+        """選択肢テキストを適切に改行分割"""
+        if len(text) <= max_length:
+            return self.escape_html(text)
+        
+        # 自然な分割点を探す（優先順位順）
+        # offset=1は文字の後で分割、offset=0は文字の前で分割
+        natural_breaks = [
+            ('（', 1),   # 開き括弧の後で分割
+            ('(', 1),    # 英語開き括弧の後で分割
+            ('を', 1),   # 「を」の後で分割
+            ('の', 1),   # 「の」の後で分割
+            ('に', 1),   # 「に」の後で分割
+            ('で', 1),   # 「で」の後で分割
+            ('・', 1),   # 中点の後で分割
+            ('、', 1),   # 読点の後で分割（読点を前の行に含める）
+            ('。', 1),   # 句点の後で分割（句点を前の行に含める）
+            ('，', 1),   # カンマの後で分割（カンマを前の行に含める）
+            ('；', 1),   # セミコロンの後で分割（セミコロンを前の行に含める）
+        ]
+        
+        # 最適な分割位置を探す（テキストの中央付近で自然な分割点を探す）
+        min_pos = max(3, max_length // 3)  # 最低3文字、理想的には1/3の位置以降
+        max_pos = min(len(text) - 3, max_length * 2 // 3)  # 最大で2/3の位置まで
+        
+        best_split = None
+        best_distance = float('inf')
+        target_pos = len(text) // 2  # 理想的な分割位置（中央）
+        
+        # 句読点系の分割は特別扱い（行頭に来るのを防ぐ）
+        punctuation_chars = ['、', '。', '，', '；']
+        
+        for break_char, offset in natural_breaks:
+            pos = text.find(break_char)
+            while pos != -1:
+                split_pos = pos + offset
+                
+                # 句読点系の場合は、範囲を拡張して優先的に処理
+                if break_char in punctuation_chars:
+                    # 句読点の場合は、最小位置を緩和（ただし3文字は確保）
+                    punctuation_min_pos = max(3, min_pos - 2)
+                    punctuation_max_pos = min(len(text) - 2, max_pos + 4)  # 範囲を拡張
+                    
+                    if punctuation_min_pos <= split_pos <= punctuation_max_pos and 0 < split_pos < len(text):
+                        # 句読点分割は優先度を高くする（距離を半分に計算）
+                        distance = abs(split_pos - target_pos) * 0.5
+                        if distance < best_distance:
+                            best_distance = distance
+                            best_split = split_pos
+                            break  # 句読点が見つかったら即採用
+                else:
+                    # 通常の分割点の場合
+                    if min_pos <= split_pos <= max_pos and 0 < split_pos < len(text):
+                        distance = abs(split_pos - target_pos)
+                        if distance < best_distance:
+                            best_distance = distance
+                            best_split = split_pos
+                            break  # 最初に見つけた自然な分割点を使用
+                
+                pos = text.find(break_char, pos + 1)
+            
+            # 句読点が見つかった場合は、他の分割点は探索しない
+            if best_split and break_char in punctuation_chars:
+                break
+            elif best_split:
+                break  # 優先順位の高い分割点が見つかったら終了
+        
+        # 自然な分割点が見つからない場合、中央付近で分割
+        if best_split is None:
+            best_split = min(max_length, len(text) // 2)
+        
+        part1 = text[:best_split]
+        part2 = text[best_split:]
+        
+        return f"{self.escape_html(part1)}<br>{self.escape_html(part2)}"
 
     def render_stacked_bar(self, title: str, counts: dict, order: list[str], colors: dict, unit: str, show_total_right: bool = True) -> str:
         """1本の積み上げ棒HTMLを生成"""
@@ -786,7 +865,7 @@ class HTMLComponents:
         # ヘッダ
         thead = (
             "<thead><tr>"
-            "<th style=\"width: 50px; writing-mode: vertical-rl;\">選択肢</th>"
+            "<th class=\"option-text\">選択肢</th>"
             "<th>区分（人数）</th>"
             "<th>割合</th>"
             "</tr></thead>"
@@ -815,7 +894,8 @@ class HTMLComponents:
                 pct_val = 0 if denom == 0 else round(num * 100.0 / denom, 1)
                 # A列
                 if first:
-                    a_cell = f"<td class=\"label\" rowspan=\"{len(frames)}\" style=\"writing-mode: vertical-rl; width: 50px; text-align: center;\">{self.escape_html(o)}</td>"
+                    formatted_option = self.split_long_option_text(o, self.config.max_option_text_length)
+                    a_cell = f"<td class=\"label option-text\" rowspan=\"{len(frames)}\">{formatted_option}</td>"
                     first = False
                 else:
                     a_cell = ""
@@ -1439,6 +1519,7 @@ class ReportGenerator:
   table.simple tfoot td {{ font-weight: 700; background: #fafafa; }}
   table.simple td.label {{ text-align: left; }}
   .option-pct td {{ vertical-align: middle; }}
+  .option-pct .option-text {{ width: 80px; writing-mode: vertical-rl; text-align: center; line-height: 1.3; padding: 4px 2px; word-break: keep-all; vertical-align: middle; }}
   .pct-bar {{ position: relative; height: 12px; background: #f2f4f8; border: 1px solid #d0d7e2; border-radius: 6px; display: flex; align-items: center; }}
   .pct-bar-fill {{ position: absolute; top: 0; left: 0; bottom: 0; background: #4c8bf5; display: flex; align-items: center; justify-content: flex-end; }}
   .pct-bar-label {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; text-shadow: 0 1px 0 rgba(255,255,255,0.6); }}
