@@ -876,14 +876,8 @@ class HTMLComponents:
         if not frames or not options:
             return ""
 
-        # ヘッダ
-        thead = (
-            "<thead><tr>"
-            "<th class=\"option-text\">選択肢</th>"
-            "<th>区分（人数）</th>"
-            "<th>割合</th>"
-            "</tr></thead>"
-        )
+        # ヘッダ（削除）
+        thead = ""
 
         # 事前計算（各区分の分母）
         frame_denoms = [(name, len(fr)) for name, fr in frames]
