@@ -1,12 +1,15 @@
-# Python
-import re
+# Standard library
 import os
-import pandas as pd
-import numpy as np
+import re
+import traceback
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from dataclasses import dataclass, field
 from typing import Dict, List, Tuple, Optional
+
+# Third-party
+import numpy as np
+import pandas as pd
 
 # 簡易 .env ローダー（外部依存なし）
 # 優先順位: 既存の環境変数 > .env(CWD) > .env(リポジトリルート)
@@ -855,7 +858,10 @@ class QuestionComponent(HTMLComponents):
         """設問ヘッダー（タイトル + 補足 + 選択肢一覧）を生成"""
         inner_sup = ""
         if supplement:
-            inner_sup = f"<h3 class=\"supplement\">{preprocess_supplement_html(supplement)}</h3>"
+            escaped = self.escape_html(supplement)
+            escaped = escaped.replace("（", "<span style=\"white-space: nowrap;\">（")
+            escaped = escaped.replace("）", "）</span>")
+            inner_sup = f"<h3 class=\"supplement\">{escaped}</h3>"
         
         options_html = ""
         if options:
@@ -1132,7 +1138,21 @@ class ReportDataPreparator:
     def prepare_data(self, excel_path: Path) -> ProcessedData:
         """Excelファイルからレポート用データを準備"""
         # 1) 読み込み
-        df = pd.read_excel(excel_path, engine="openpyxl")
+        try:
+            df = pd.read_excel(excel_path, engine="openpyxl")
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Excelファイルが見つかりません: {excel_path}")
+        except Exception as e:
+            raise ValueError(f"Excelファイルの読み込みに失敗しました: {e}")
+        
+        # データの基本検証
+        if df.empty:
+            raise ValueError("Excelファイルにデータが含まれていません")
+        
+        required_columns = ["生年月日", "性別"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise ValueError(f"必須列が不足しています: {missing_columns}")
         
         # 2) 「回答」列の例外的な処理
         df = self.map_answer_columns(df)
@@ -1310,29 +1330,238 @@ class ReportDataPreparator:
         return 0 if d == 0 else round(n * 100.0 / d, 1)
 
 
-# Phase 3: 新しいデータ処理・設定管理を使用したメインコード
+# Phase 4: 統合・最適化
+class ReportGenerator:
+    """レポート生成の統合クラス"""
+    
+    def __init__(self, report_config: ReportConfig, component_config: ComponentConfig):
+        self.report_config = report_config
+        self.component_config = component_config
+        self.data_preparator = ReportDataPreparator(report_config)
+        
+    def generate_report(self, excel_path: Path, output_path: str = "report.html") -> None:
+        """完全なHTMLレポートを生成"""
+        try:
+            # 1. データ準備
+            print("データを準備中...")
+            processed_data = self.data_preparator.prepare_data(excel_path)
+            
+            # 2. 設問一覧を出力
+            print("設問一覧（候補）:")
+            for q in processed_data.question_columns:
+                print(f"- {q}")
+            
+            # 3. CSSスタイル取得
+            styles = self._get_styles()
+            
+            # 4. コンポーネント初期化
+            question_component = QuestionComponent(styles, self.component_config)
+            demographics_component = DemographicsComponent(styles, self.component_config)
+            
+            # 5. HTMLセクション生成
+            print("HTMLセクションを生成中...")
+            overview_html = demographics_component.render_overview_section(
+                self.report_config.organizer, 
+                self.report_config.survey_name, 
+                self.report_config.participating_schools, 
+                self.report_config.venue, 
+                self.report_config.event_dates, 
+                processed_data.n_total, 
+                processed_data.n_preschool
+            )
+            
+            demographics_html = demographics_component.render_demographics_section(
+                processed_data.gender_crosstab, 
+                processed_data.gender_row_totals, 
+                processed_data.gender_row_pct, 
+                processed_data.gender_col_totals, 
+                processed_data.region_crosstab, 
+                processed_data.region_row_totals, 
+                processed_data.region_row_pct, 
+                processed_data.region_col_totals, 
+                processed_data.grand_total
+            )
+            
+            # 設問セクション
+            sections = []
+            for idx, q in enumerate(processed_data.question_columns):
+                section_html = question_component.render_question_section(
+                    idx, q, processed_data.df_original, processed_data.df_effective, processed_data.n_total
+                )
+                sections.append(section_html)
+            question_sections_html = "\n".join(sections)
+            
+            # 6. 最終HTML構築
+            html = self._build_final_html(styles, overview_html, demographics_html, question_sections_html)
+            
+            # 7. 保存
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(html)
+            
+            print(f"HTMLレポートを出力しました: {output_path}  （{processed_data.n_total}件、未就学児{processed_data.n_preschool}組を除く）")
+            
+        except Exception as e:
+            print(f"エラーが発生しました: {e}")
+            raise
+    
+    def _get_styles(self) -> str:
+        """CSSスタイルを取得"""
+        return f"""
+  @page {{ size: A4 portrait; }}
+  html, body {{ }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif; color: #222; }}
+  .page {{ max-width: 180mm; margin: 0 auto; background: white; }}
+  h1 {{ font-size: 18pt; margin: 0 0 8mm; }}
+  h2 {{ font-size: 13pt; margin: 6mm 0 3mm; border-bottom: 2px solid #eee; padding-bottom: 2mm; }}
+  section > *:not(h2) {{ margin-left: 6mm; }}
+  h3 {{ font-size: 11pt; margin: 3mm 0 2mm; }}
+  .title {{ margin: 0 0 6mm; }}
+  .title .line1 {{ font-size: 9pt; color: #555; }}
+  .title .line2 {{ font-size: 20pt; font-weight: 800; margin-top: 1mm; }}
+  .muted {{ color: #777; font-size: 8pt; }}
+  .kpis {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 8mm; margin-bottom: 6mm; }}
+  .kpi {{ border: 1px solid #e5e5e5; border-radius: 6px; padding: 6mm; }}
+  .kpi .label {{ font-size: 9pt; color: #666; }}
+  .kpi .value {{ font-size: 22pt; font-weight: 700; margin-top: 2mm; }}
+  .bars {{ display: grid; grid-template-columns: 1fr; gap: 3mm; margin-top: 4mm; }}
+  .bar {{ background: #f2f4f8; border: 1px solid #d0d7e2; border-radius: 999px; overflow: hidden; height: 10px; position: relative; }}
+  .bar > span {{ display: block; height: 100%; background: #4c8bf5; }}
+  .bar.secondary > span {{ background: #f58b4c; }}
+  .bar.other > span {{ background: #b5b5b5; }}
+  .legend {{ display: flex; gap: 6mm; flex-wrap: wrap; margin-top: 2mm; font-size: 8pt; color: #555; padding-left: 6mm; }}
+  .legend .item::before {{ content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }}
+  .legend .male::before {{ background: #4c8bf5; }}
+  .legend .female::before {{ background: #f58b4c; }}
+  .legend .other::before {{ background: #b5b5b5; }}
+  table.simple {{ border-collapse: collapse; width: 100%; font-size: 10pt; }}
+  table.simple th, table.simple td {{ border: 1px solid #e0e0e0; padding: 6px 8px; text-align: right; }}
+  table.simple th {{ background: #f9fafb; color: #444; text-align: center; }}
+  table.simple tfoot td {{ font-weight: 700; background: #fafafa; }}
+  table.simple td.label {{ text-align: left; }}
+  .option-pct td {{ vertical-align: middle; }}
+  .pct-bar {{ position: relative; height: 12px; background: #f2f4f8; border: 1px solid #d0d7e2; border-radius: 6px; display: flex; align-items: center; }}
+  .pct-bar-fill {{ position: absolute; top: 0; left: 0; bottom: 0; background: #4c8bf5; display: flex; align-items: center; justify-content: flex-end; }}
+  .pct-bar-label {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; text-shadow: 0 1px 0 rgba(255,255,255,0.6); }}
+  .pct-in-bar {{ font-size: 8pt; color: white; margin-right: 4px; text-shadow: 0 1px 0 rgba(0,0,0,0.3); }}
+  .pct-bar-right {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; white-space: nowrap; }}
+  table.simple th:nth-child(1), table.simple td:nth-child(1) {{ width: 28%; }}
+  table.simple th:nth-child(2), table.simple td:nth-child(2) {{ width: 18%; }}
+  table.simple th:nth-child(3), table.simple td:nth-child(3) {{ width: 18%; }}
+  table.simple th:nth-child(4), table.simple td:nth-child(4) {{ width: 18%; }}
+  table.simple th:nth-child(5), table.simple td:nth-child(5) {{ width: 18%; }}
+  table.simple.region-pct {{ table-layout: fixed; }}
+  table.simple.region-pct th:nth-child(1), 
+  table.simple.region-pct td:nth-child(1) {{ width: 50px; min-width: 50px; max-width: 50px; }}
+  table.simple.region-pct th:nth-child(2),
+  table.simple.region-pct td:nth-child(2) {{ width: 90px; min-width: 90px; max-width: 90px; }}
+  table.simple.region-pct th:nth-child(3),
+  table.simple.region-pct td:nth-child(3) {{ width: auto; }}
+  table.simple.option-pct td {{ padding: 3px 8px; }}
+  table.simple.region-pct {{ height: auto; overflow: hidden; }}
+  table.simple.region-pct tbody {{ height: auto; }}
+  table.simple.region-pct tr {{ height: auto; }}
+  .overview-list {{ display: grid; grid-template-columns: 38mm 1fr; column-gap: 6mm; row-gap: 2mm; font-size: 10pt; }}
+  .overview-list .label {{ color: #555; }}
+  .overview-list .value {{ font-weight: 600; }}
+  @media print {{
+    * {{ -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }}
+    html, body {{ height: auto !important; }}
+    .page {{ max-width: 180mm; min-height: auto; }}
+    .page > :last-child {{ margin-bottom: 0 !important; padding-bottom: 0 !important; }}
+    .bar {{ background: #f2f4f8 !important; border-color: #d0d7e2 !important; }}
+    .bar > span {{ background: #4c8bf5 !important; }}
+    .bar.secondary > span {{ background: #f58b4c !important; }}
+    .bar.other > span {{ background: #b5b5b5 !important; }}
+  }}
+  section.page-break {{
+    break-before: page;
+    page-break-before: always;
+  }}
+  .supplement {{ font-size: 10pt; color: #555; margin: 2mm 0 2mm; white-space: pre-wrap; }}
+  .note-box {{ display: block; max-width: 100%; padding: 3mm 5mm; border: 1px solid #e0e6ef; background: #f7f9fc; border-radius: 8px; }}
+  .note-box h3 {{ margin: 0 0 2mm; }}
+  .note-box .options {{ display: flex; flex-wrap: wrap; gap: 2mm 4mm; align-items: flex-start; }}
+  .note-box .option-item {{ display: inline-flex; white-space: nowrap; font-size: 10pt; }}
+  .q-subheading {{ font-size: 10pt; margin: 3mm 0 2mm; color: #333; }}
+  .bar-row {{ display: flex; align-items: center; gap: 6mm; margin: 0.8mm 0 2.5mm 0; }}
+  .bar-container {{ display: flex; align-items: center; gap: 6mm; margin: 0.8mm 0 2.5mm 0; position: relative; }}
+  .bar-content {{ flex: 1 1 auto; position: relative; }}
+  .outside-labels-top {{ position: relative; margin-bottom: 0; }}
+  .outside-labels-bottom {{ position: relative; margin-top: 0; }}
+  .outside-labels-top .label-layer-1 {{ display: flex; align-items: end; }}
+  .outside-labels-bottom .label-layer-1 {{ display: flex; align-items: start; }}
+  .label-layer-1 {{ height: 12px; position: relative; }}
+  .label-layer-2 {{ height: 16px; position: relative; }}
+  .label-layer-3 {{ height: 16px; position: relative; }}
+  .label-layer-4 {{ height: 16px; position: relative; }}
+  .label-layer-5 {{ height: 16px; position: relative; }}
+  .label-layer-6 {{ height: 16px; position: relative; }}
+  .label-layer-7 {{ height: 16px; position: relative; }}
+  .label-layer-8 {{ height: 16px; position: relative; }}
+  .label-layer-9 {{ height: 16px; position: relative; }}
+  .label-layer-10 {{ height: 16px; position: relative; }}
+  .outside-label {{ position: absolute; font-size: 8pt; color: #333; background: rgba(255,255,255,0.9); 
+    padding: 1px 4px; border-radius: 3px; border: 1px solid #ddd; white-space: nowrap; z-index: 10; }}
+  .leader-line {{ position: absolute; border-left: 1px solid #999; z-index: 5; }}
+  .leader-line.to-top {{ bottom: 0; }}
+  .leader-line.to-bottom {{ top: 0; }}
+  .stacked-bar {{ flex: 1 1 auto; position: relative; height: 16px; border-radius: 8px; overflow: hidden; background: #f2f4f8; border: 1px solid #d0d7e2; }}
+  .stacked-bar .seg {{ position: absolute; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; white-space: nowrap; font-size: 9pt; color: #fff; padding: 0 4px; }}
+  .stacked-bar .seg .seg-label {{ font-weight: 600; text-shadow: 0 1px 0 rgba(0,0,0,0.25); }}
+  .bar-right {{ flex: 0 0 22mm; font-size: 9pt; color: #444; text-align: right; }}
+  .legend2 {{ display: flex; flex-wrap: wrap; gap: 5mm; font-size: 10pt; font-weight: 600; color: #333; margin: 1mm 0 2mm; padding-left: 6mm; }}
+  .legend2 .item {{ display: inline-flex; align-items: center; gap: 4px; }}
+  .legend2 .swatch {{ width: 10px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid rgba(0,0,0,0.05); }}
+"""
+    
+    def _build_final_html(self, styles: str, overview_html: str, demographics_html: str, question_sections_html: str) -> str:
+        """最終HTML文書を構築"""
+        return f"""<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>サマリレポート</title>
+  <style>
+  {styles}
+  </style>
+</head>
+<body>
+  <div class="page">
+    {overview_html}
+    {demographics_html}
+    {question_sections_html}
+  </div>
+</body>
+</html>"""
 
-# .env から設定を読み込み
-_load_env_from_dotenv()
-report_config = ReportConfig.from_env()
-component_config = ComponentConfig()
 
-# データ準備
-data_preparator = ReportDataPreparator(report_config)
-processed_data = data_preparator.prepare_data(Path(__file__).parent / "survey.xlsx")
-
-# コンポーネントのインスタンスを作成（設定を渡す）
-html_components = HTMLComponents(styles=a4_css, config=component_config)
-question_component = QuestionComponent(styles=a4_css, config=component_config)
-demographics_component = DemographicsComponent(styles=a4_css, config=component_config)
-
-# 設問一覧を出力
-print("設問一覧（候補）:")
-for q in processed_data.question_columns:
-    print(f"- {q}")
+# Phase 4: 最終形 - 統合されたメインコード
+def main():
+    """メイン実行関数"""
+    try:
+        # 設定を読み込み
+        _load_env_from_dotenv()
+        report_config = ReportConfig.from_env()
+        component_config = ComponentConfig()
+        
+        # レポートジェネレーターを作成して実行
+        generator = ReportGenerator(report_config, component_config)
+        excel_path = Path(__file__).parent / "survey.xlsx"
+        
+        if not excel_path.exists():
+            print(f"エラー: ファイルが見つかりません: {excel_path}")
+            return
+        
+        generator.generate_report(excel_path)
+        
+    except Exception as e:
+        print(f"エラーが発生しました: {e}")
+        traceback.print_exc()
 
 # 後方互換のためのヘルパー関数（既存コードが依存している）
 def first_non_empty_value(series: pd.Series):
+    """SeriesからNonEmpty最初の値を取得"""
     if series is None:
         return None
     for v in series:
@@ -1343,18 +1572,9 @@ def first_non_empty_value(series: pd.Series):
             return s
     return None
 
-def escape_html(s: str) -> str:
-    return html_components.escape_html(s)
-
-def preprocess_supplement_html(raw: str) -> str:
-    if raw is None:
-        return ""
-    escaped = escape_html(raw)
-    escaped = escaped.replace("（", "<span style=\"white-space: nowrap;\">（")
-    escaped = escaped.replace("）", "）</span>")
-    return escaped
 
 def cell_to_unique_set(val) -> set:
+    """セル値をユニークなsetに変換（後方互換用）"""
     if pd.isna(val):
         return set()
     s = str(val).strip()
@@ -1373,6 +1593,7 @@ def cell_to_unique_set(val) -> set:
     return set(uniq)
 
 def is_multiselect(frame: pd.DataFrame, qcol: str) -> bool:
+    """複数回答可否の判定（後方互換用）"""
     name = str(qcol)
     if ("複数" in name) or ("複数回答" in name):
         return True
@@ -1543,375 +1764,6 @@ def calculate_flexbox_positions(labels_data: list, available_width_percent: floa
     
     return adjusted_positions
 
-# 1本の積み上げ棒HTMLを生成
 
-def render_stacked_bar(title: str, counts: dict, order: list[str], colors: dict, unit: str, show_total_right: bool = True) -> str:
-    S = sum(counts.values())
-    if S == 0:
-        return ""
-    
-    # 1. 実際の割合を計算
-    actual_widths = {}
-    for o in order:
-        c = counts.get(o, 0)
-        if c > 0:
-            actual_widths[o] = (c / S) * 100.0
-    
-    # 2. 外側ラベル対象を判定
-    outside_labels = []
-    inside_segments = []
-    
-    for o in order:
-        if o not in actual_widths:
-            continue
-        actual_w = actual_widths[o]
-        if actual_w < OUTSIDE_LABEL_THRESHOLD_PCT:
-            outside_labels.append(o)
-        else:
-            inside_segments.append(o)
-    
-    # 3. 最小幅保証の調整（内側ラベルのセグメントに対して）
-    adjusted_widths = {}
-    adjustment_needed = 0.0
-    
-    for o, actual_w in actual_widths.items():
-        if o in inside_segments and actual_w < MIN_SEGMENT_WIDTH_PCT:
-            adjusted_widths[o] = MIN_SEGMENT_WIDTH_PCT
-            adjustment_needed += MIN_SEGMENT_WIDTH_PCT - actual_w
-        else:
-            adjusted_widths[o] = actual_w
-    
-    # 4. 最小幅保証により増えた分を、他のセグメントから比例配分で減らす
-    if adjustment_needed > 0:
-        reducible_total = sum(w for o, w in actual_widths.items() if w >= MIN_SEGMENT_WIDTH_PCT)
-        
-        if reducible_total > 0:
-            reduction_ratio = adjustment_needed / reducible_total
-            for o in adjusted_widths:
-                if actual_widths[o] >= MIN_SEGMENT_WIDTH_PCT:
-                    adjusted_widths[o] = actual_widths[o] * (1 - reduction_ratio)
-    
-    # 5. 外側ラベル配置の計算（新しいFlexbox風アルゴリズム）
-    def calculate_outside_labels_html():
-        if not outside_labels:
-            return "", ""
-        
-        # 各外側ラベルの基本情報を集める
-        label_data = []
-        for o in outside_labels:
-            # セグメント中央位置を計算
-            left_pos = 0.0
-            for prev_o in order:
-                if prev_o == o:
-                    break
-                if prev_o in adjusted_widths:
-                    left_pos += adjusted_widths[prev_o]
-            
-            center_pos = left_pos + (adjusted_widths.get(o, 0) / 2)
-            label_pct = round((counts.get(o, 0) / S) * 100.0, 1)
-            
-            # 外側ラベルの表示内容を判定
-            if label_pct >= OUTSIDE_LABEL_WITH_INNER_PCT_THRESHOLD:
-                # 5%以上: 外側は選択肢名のみ、内側に割合表示
-                label_text = f"{escape_html(o)}"
-            else:
-                # 5%未満: 外側に選択肢名+割合表示
-                label_text = f"{escape_html(o)} {label_pct}%"
-            
-            label_data.append((center_pos, label_text, o))
-        
-        # Flexbox風配置で位置調整
-        adjusted_label_data = calculate_flexbox_positions(label_data, 100.0)
-        
-        # 調整後の配置で層分けを実行
-        # 可能な限り同じ高さ（layer1）に配置し、重なりがある場合のみ分散
-        from collections import defaultdict
-        top_layers = defaultdict(list)
-        bottom_layers = defaultdict(list)
-        
-        # まずは全て上layer1に配置を試行
-        for i, (pos, text, option) in enumerate(adjusted_label_data):
-            if i < len(adjusted_label_data) // 2:  # 前半は上側
-                top_layers[1].append((pos, text, option))
-            else:  # 後半は下側
-                bottom_layers[1].append((pos, text, option))
-        
-        # HTML生成：動的に層を構築
-        def render_label_layer(labels, layer_num, has_leader_line=False, line_direction=""):
-            if not labels:
-                return ""
-            layer_class = f"label-layer-{layer_num}"
-            layer_html = f'<div class="{layer_class}">'
-            for pos, text, option in labels:
-                label_style = f"left:{pos:.2f}%; transform:translateX(-50%);"
-                layer_html += f'<div class="outside-label" style="{label_style}">{text}</div>'
-                if has_leader_line:
-                    line_style = f"left:{pos:.2f}%; height:100%;"
-                    layer_html += f'<div class="leader-line {line_direction}" style="{line_style}"></div>'
-            layer_html += '</div>'
-            return layer_html
-        
-        # 上側の層を逆順で配置（遠い層から先に配置）
-        top_html = ""
-        max_top_layer = max(top_layers.keys()) if top_layers else 0
-        for layer_num in range(max_top_layer, 0, -1):  # 大きい層番号から小さい層番号へ
-            if layer_num in top_layers:
-                has_leader = (layer_num > 1)  # layer1のみリード線なし
-                top_html += render_label_layer(top_layers[layer_num], layer_num, has_leader, "to-bottom")
-        
-        # 下側の層を正順で配置（近い層から先に配置）
-        bottom_html = ""
-        max_bottom_layer = max(bottom_layers.keys()) if bottom_layers else 0
-        for layer_num in range(1, max_bottom_layer + 1):  # 小さい層番号から大きい層番号へ
-            if layer_num in bottom_layers:
-                has_leader = (layer_num > 1)  # layer1のみリード線なし
-                bottom_html += render_label_layer(bottom_layers[layer_num], layer_num, has_leader, "to-top")
-        
-        top_container = f'<div class="outside-labels-top">{top_html}</div>' if top_html else ""
-        bottom_container = f'<div class="outside-labels-bottom">{bottom_html}</div>' if bottom_html else ""
-        
-        return top_container, bottom_container
-    
-    top_labels_html, bottom_labels_html = calculate_outside_labels_html()
-    
-    # 6. セグメントHTML生成（内側ラベルのみ）
-    left = 0.0
-    segs = []
-    for o in order:
-        if o not in adjusted_widths:
-            continue
-        
-        c = counts.get(o, 0)
-        w = adjusted_widths[o]
-        label_pct = round((c / S) * 100.0, 1)
-        
-        style = f"left:{left:.6f}%;width:{w:.6f}%;background:{colors.get(o,'#999')};"
-        
-        # 内側ラベル表示判定
-        if o in inside_segments:
-            # 内側セグメント: 選択肢名+割合表示（従来通り）
-            segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{escape_html(o)} {label_pct}%\"><span class=\"seg-label\">{escape_html(o)} {label_pct}%</span></div>")
-        else:
-            # 外側ラベル対象
-            if label_pct >= OUTSIDE_LABEL_WITH_INNER_PCT_THRESHOLD:
-                # 10%以上: 棒内部に割合のみ表示
-                segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{escape_html(o)} {label_pct}%\"><span class=\"seg-label\">{label_pct}%</span></div>")
-            else:
-                # 10%未満: 棒内部にラベル非表示
-                segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{escape_html(o)} {label_pct}%\"></div>")
-        
-        left += w
-    
-    s_text = f"{S:,}{unit}"
-    
-    # 7. 最終HTML構造
-    if outside_labels:
-        right_html = f'<div class="bar-right">{s_text}</div>' if show_total_right else ''
-        return f"""<div class="bar-container">
-  <div class="bar-content">
-    {top_labels_html}
-    <div class="stacked-bar">{''.join(segs)}</div>
-    {bottom_labels_html}
-  </div>
-  {right_html}
-</div>"""
-    else:
-        # 外側ラベルがない場合は従来通り
-        if show_total_right:
-            return f'<div class="bar-row"><div class="stacked-bar">{"".join(segs)}</div><div class="bar-right">{s_text}</div></div>'
-        else:
-            return f'<div class="bar-row"><div class="stacked-bar">{"".join(segs)}</div></div>'
-
-# グループごとの棒群HTML（見出し＋棒複数 or データなし）
-
-def render_group_bars(group_label: str, frames: list, qcol: str, order: list, colors: dict, unit: str) -> str:
-    bars = []
-    for name, fr in frames:
-        counts, S = aggregate_group(fr, qcol, order)
-        if S > 0:
-            bars.append(f"<div><div class=\"q-subheading\">{escape_html(name)}</div>{render_stacked_bar(name, counts, order, colors, unit)}</div>")
-    if not bars:
-        return f"<div class=\"q-subheading\">{escape_html(group_label)}</div><div class=\"muted\">データなし</div>"
-    # group_label as a heading, then stacked bars listed vertically
-    inner = []
-    # 単位から表示サフィックス（人/回）を決定
-    suffix = "回" if unit.endswith("回中") else "人"
-    for name, fr in frames:
-        counts, S = aggregate_group(fr, qcol, order)
-        if S == 0:
-            continue
-        bar_html = render_stacked_bar(name, counts, order, colors, unit, show_total_right=False)
-        label_text = f"{escape_html(name)} = {S:,}{suffix}"
-        inner.append(f"<div><div class=\"muted\" style=\"margin-bottom:0.3mm;\">{label_text}</div>{bar_html}</div>")
-    return f"<div class=\"q-subheading\">{escape_html(group_label)}</div>" + "".join(inner)
-
-# 伝説（凡例）
-
-def render_legend(order: list[str], colors: dict) -> str:
-    items = []
-    for o in order:
-        items.append(f"<span class=\"item\"><span class=\"swatch\" style=\"background:{colors.get(o,'#999')}\"></span>{escape_html(o)}</span>")
-    return f"<div class=\"legend2\">{''.join(items)}</div>"
-
-# 指定したフレーム群に対して、選択肢ごとのカウント表を生成
-# columns: [sub_label] + options
-# rows: 先頭に「全体」、続いて各カテゴリ
-
-def render_option_count_table(sub_label: str, header_label: str, frames: list[tuple[str, pd.DataFrame]], qcol: str, options: list[str]) -> str:
-    # 列ヘッダー（転置版）: 選択肢 | 全体 | 各カテゴリ名
-    col_headers = ["選択肢", "全体"] + [escape_html(name) for name, _ in frames]
-    thead = "<thead><tr>" + "".join([f"<th>{h}</th>" for h in col_headers]) + "</tr></thead>"
-
-    # 全体のフレーム（全カテゴリ結合）
-    all_frame = pd.concat([fr for _, fr in frames], axis=0) if frames else df_eff
-    overall_counts, _S_overall = aggregate_group(all_frame, qcol, options)
-    # 分母（回答者数）: 設問によらず、全体は n_total、各カテゴリは len(fr)
-    overall_denom = n_total
-
-    # 各カテゴリの集計を事前計算
-    per_frame_counts = []  # [(name, counts_dict, denom)]
-    for name, fr in frames:
-        counts, _S = aggregate_group(fr, qcol, options)
-        denom = len(fr)
-        per_frame_counts.append((name, counts, denom))
-
-    # 行: 各選択肢
-    body_rows = []
-    for o in options:
-        tds = [f"<td class=\"label\">{escape_html(o)}</td>"]
-        # 全体（分母: 回答者数）
-        ov_num = overall_counts.get(o, 0)
-        ov_pct = 0 if overall_denom == 0 else round(ov_num * 100.0 / overall_denom, 1)
-        tds.append(f"<td>{fmt_int(ov_num)}<div class=\"muted\" style=\"font-size:8pt;\">{ov_pct}%</div></td>")
-        # 各カテゴリ（分母: そのカテゴリの回答者数）
-        for name, counts, denom in per_frame_counts:
-            num = counts.get(o, 0)
-            pct_val = 0 if denom == 0 else round(num * 100.0 / denom, 1)
-            tds.append(f"<td>{fmt_int(num)}<div class=\"muted\" style=\"font-size:8pt;\">{pct_val}%</div></td>")
-        body_rows.append("<tr>" + "".join(tds) + "</tr>")
-
-    tbody = "<tbody>" + "".join(body_rows) + "</tbody>"
-
-    return f"<div class=\"q-subheading\">{escape_html(sub_label)}</div><table class=\"simple\">{thead}{tbody}</table>"
-
-# 選択肢ごと × 区分ごとの割合を横棒で示すテーブル（A/B/Cレイアウト風）
-# - 3列: 選択肢 | 区分（人数） | 割合（横棒）
-# - 各選択肢で行グループ化（rowspan）
-
-def render_option_category_pct_table(sub_label: str, frames: list[tuple[str, pd.DataFrame]], qcol: str, options: list[str], colors: dict) -> str:
-    if not frames or not options:
-        return ""
-
-    # ヘッダ
-    thead = (
-        "<thead><tr>"
-        "<th style=\"width: 50px; writing-mode: vertical-rl;\">選択肢</th>"
-        "<th>区分（人数）</th>"
-        "<th>割合</th>"
-        "</tr></thead>"
-    )
-
-    # 事前計算（各区分の分母）
-    frame_denoms = [(name, len(fr)) for name, fr in frames]
-    # 各区分ごとの選択肢カウント
-    per_frame_counts = []  # (name, counts)
-    for name, fr in frames:
-        counts, _S = aggregate_group(fr, qcol, options)
-        per_frame_counts.append((name, counts))
-
-    # name -> (counts, denom) lookup
-    counts_map = {name: counts for name, counts in per_frame_counts}
-    denom_map = {name: denom for name, denom in frame_denoms}
-
-    # 行生成
-    body_rows = []
-    for o in options:
-        first = True
-        # 表示対象の行数（全区分を表示。必要なら0件も表示）
-        for name, _ in frames:
-            denom = denom_map.get(name, 0)
-            num = counts_map.get(name, {}).get(o, 0)
-            pct_val = 0 if denom == 0 else round(num * 100.0 / denom, 1)
-            # A列
-            if first:
-                a_cell = f"<td class=\"label\" rowspan=\"{len(frames)}\" style=\"writing-mode: vertical-rl; width: 50px; text-align: center;\">{escape_html(o)}</td>"
-                first = False
-            else:
-                a_cell = ""
-            # B列（区分名）
-            b_text = f"{escape_html(name)}"
-            b_cell = f"<td>{b_text}</td>"
-            # C列（横棒）
-            bar_color = colors.get(o, "#4c8bf5")
-            c_cell = (
-                f"<td>"
-                f"  <div class=\"pct-bar\">"
-                f"    <div class=\"pct-bar-fill\" style=\"width:{pct_val}%;background:{bar_color};\"><span class=\"pct-in-bar\">{pct_val}%</span></div>"
-                f"    <div class=\"pct-bar-right\">{num} / {denom} (人)</div>"
-                f"  </div>"
-                f"</td>"
-            )
-            body_rows.append("<tr>" + a_cell + b_cell + c_cell + "</tr>")
-
-    tbody = "<tbody>" + "".join(body_rows) + "</tbody>"
-
-    return f"<div class=\"q-subheading\">{escape_html(sub_label)}</div><table class=\"simple option-pct region-pct\">{thead}{tbody}</table>"
-
-# 設問セクションを生成（ProcessedDataを使用）
-sections = []
-for idx, q in enumerate(processed_data.question_columns):
-    section_html = question_component.render_question_section(
-        idx, q, processed_data.df_original, processed_data.df_effective, processed_data.n_total
-    )
-    sections.append(section_html)
-
-question_sections_html = "\n".join(sections)
-
-# 新しいDemographicsComponentを使用してHTML構築（ProcessedDataから取得）
-overview_html = demographics_component.render_overview_section(
-    report_config.organizer, 
-    report_config.survey_name, 
-    report_config.participating_schools, 
-    report_config.venue, 
-    report_config.event_dates, 
-    processed_data.n_total, 
-    processed_data.n_preschool
-)
-demographics_html = demographics_component.render_demographics_section(
-    processed_data.gender_crosstab, 
-    processed_data.gender_row_totals, 
-    processed_data.gender_row_pct, 
-    processed_data.gender_col_totals, 
-    processed_data.region_crosstab, 
-    processed_data.region_row_totals, 
-    processed_data.region_row_pct, 
-    processed_data.region_col_totals, 
-    processed_data.grand_total
-)
-
-html = f"""
-<!doctype html>
-<html lang=\"ja\">
-<head>
-  <meta charset=\"utf-8\" />
-  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-  <title>サマリレポート</title>
-  <style>
-  {a4_css}
-  </style>
-</head>
-<body>
-  <div class=\"page\">
-    {overview_html}
-    {demographics_html}
-    {question_sections_html}
-  </div>
-</body>
-</html>
-"""
-
-# 保存
-with open("report.html", "w", encoding="utf-8") as f:
-    f.write(html)
-
-print(f"HTMLレポートを出力しました: report.html  （{processed_data.n_total}件、未就学児{processed_data.n_preschool}組を除く）")
+if __name__ == "__main__":
+    main()
