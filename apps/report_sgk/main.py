@@ -331,7 +331,7 @@ a4_css = f"""
   .legend .other::before {{ background: #b5b5b5; }}
 
   /* テーブル */
-  table.simple {{ border-collapse: collapse; width: 90%; font-size: 10pt; margin-left: 6mm; }}
+  table.simple {{ border-collapse: collapse; width: 100%; font-size: 10pt; }}
   table.simple th, table.simple td {{ border: 1px solid #e0e0e0; padding: 6px 8px; text-align: right; }}
   table.simple th {{ background: #f9fafb; color: #444; text-align: center; }}
   table.simple tfoot td {{ font-weight: 700; background: #fafafa; }}
@@ -358,6 +358,9 @@ a4_css = f"""
   table.simple.region-pct td:nth-child(2) {{ width: 90px; min-width: 90px; max-width: 90px; }}
   table.simple.region-pct th:nth-child(3),
   table.simple.region-pct td:nth-child(3) {{ width: auto; }}
+  
+  /* option-pctテーブルの行間を狭く */
+  table.simple.option-pct td {{ padding: 3px 8px; }}
   
   /* テーブル全体の高さを区分（人数）列の高さに制限 */
   table.simple.region-pct {{ height: auto; overflow: hidden; }}
