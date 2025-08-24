@@ -355,7 +355,7 @@ a4_css = f"""
   table.simple.region-pct th:nth-child(1), 
   table.simple.region-pct td:nth-child(1) {{ width: 50px; min-width: 50px; max-width: 50px; }}
   table.simple.region-pct th:nth-child(2),
-  table.simple.region-pct td:nth-child(2) {{ width: 75px; min-width: 75px; max-width: 75px; }}
+  table.simple.region-pct td:nth-child(2) {{ width: 90px; min-width: 90px; max-width: 90px; }}
   table.simple.region-pct th:nth-child(3),
   table.simple.region-pct td:nth-child(3) {{ width: auto; }}
   
@@ -1031,8 +1031,8 @@ def render_option_category_pct_table(sub_label: str, frames: list[tuple[str, pd.
                 first = False
             else:
                 a_cell = ""
-            # B列（区分名 = 人数）
-            b_text = f"{escape_html(name)} = {fmt_int(num)}人"
+            # B列（区分名）
+            b_text = f"{escape_html(name)}"
             b_cell = f"<td>{b_text}</td>"
             # C列（横棒）
             bar_color = colors.get(o, "#4c8bf5")
