@@ -363,7 +363,8 @@ a4_css = f"""
   table.simple.region-pct th:nth-child(1), 
   table.simple.region-pct td:nth-child(1) {{ width: 50px; min-width: 50px; max-width: 50px; }}
   table.simple.region-pct th:nth-child(2),
-  table.simple.region-pct td:nth-child(2) {{ width: 90px; min-width: 90px; max-width: 90px; }}
+  table.simple.region-pct td:nth-child(2),
+  table.simple.region-pct td:nth-child(1):not(.option-text) {{ width: 90px; min-width: 90px; max-width: 90px; font-size: 8pt; }}
   table.simple.region-pct th:nth-child(3),
   table.simple.region-pct td:nth-child(3) {{ width: auto; }}
   
@@ -1547,7 +1548,8 @@ class ReportGenerator:
   table.simple.region-pct th:nth-child(1), 
   table.simple.region-pct td:nth-child(1) {{ width: 50px; min-width: 50px; max-width: 50px; }}
   table.simple.region-pct th:nth-child(2),
-  table.simple.region-pct td:nth-child(2) {{ width: 90px; min-width: 90px; max-width: 90px; }}
+  table.simple.region-pct td:nth-child(2),
+  table.simple.region-pct td:nth-child(1):not(.option-text) {{ width: 90px; min-width: 90px; max-width: 90px; font-size: 8pt; }}
   table.simple.region-pct th:nth-child(3),
   table.simple.region-pct td:nth-child(3) {{ width: auto; }}
   table.simple.option-pct td {{ padding: 3px 8px; }}
