@@ -559,7 +559,13 @@ class HTMLComponents:
         
         # 最適な分割位置を探す（テキストの中央付近で自然な分割点を探す）
         min_pos = max(3, max_length // 3)  # 最低3文字、理想的には1/3の位置以降
-        max_pos = min(len(text) - 3, max_length * 2 // 3)  # 最大で2/3の位置まで
+        
+        # 長いテキストの場合は制限を緩和
+        if len(text) > max_length * 1.5:
+            # 長いテキストの場合は、より柔軟な範囲を設定
+            max_pos = min(len(text) - 3, int(len(text) * 0.75))
+        else:
+            max_pos = min(len(text) - 3, max_length * 2 // 3)  # 最大で2/3の位置まで
         
         best_split = None
         best_distance = float('inf')
@@ -568,40 +574,47 @@ class HTMLComponents:
         # 句読点系の分割は特別扱い（行頭に来るのを防ぐ）
         punctuation_chars = ['、', '。', '，', '；']
         
-        for break_char, offset in natural_breaks:
+        # 全ての分割候補を収集
+        split_candidates = []
+        
+        for priority, (break_char, offset) in enumerate(natural_breaks):
             pos = text.find(break_char)
             while pos != -1:
                 split_pos = pos + offset
                 
-                # 句読点系の場合は、範囲を拡張して優先的に処理
+                # 句読点系の場合は範囲を拡張
                 if break_char in punctuation_chars:
-                    # 句読点の場合は、最小位置を緩和（ただし3文字は確保）
                     punctuation_min_pos = max(3, min_pos - 2)
-                    punctuation_max_pos = min(len(text) - 2, max_pos + 4)  # 範囲を拡張
-                    
-                    if punctuation_min_pos <= split_pos <= punctuation_max_pos and 0 < split_pos < len(text):
-                        # 句読点分割は優先度を高くする（距離を半分に計算）
-                        distance = abs(split_pos - target_pos) * 0.5
-                        if distance < best_distance:
-                            best_distance = distance
-                            best_split = split_pos
-                            break  # 句読点が見つかったら即採用
+                    punctuation_max_pos = min(len(text) - 2, max_pos + 4)
+                    in_range = punctuation_min_pos <= split_pos <= punctuation_max_pos
                 else:
-                    # 通常の分割点の場合
-                    if min_pos <= split_pos <= max_pos and 0 < split_pos < len(text):
-                        distance = abs(split_pos - target_pos)
-                        if distance < best_distance:
-                            best_distance = distance
-                            best_split = split_pos
-                            break  # 最初に見つけた自然な分割点を使用
+                    in_range = min_pos <= split_pos <= max_pos
+                
+                if in_range and 0 < split_pos < len(text):
+                    distance = abs(split_pos - target_pos)
+                    
+                    # スコア計算（低いほど良い）
+                    if break_char in punctuation_chars:
+                        # 句読点は優先度を大幅に上げる
+                        score = distance * 0.3 + priority * 0.1
+                    elif break_char == '・':
+                        # 中点も優先度を上げる（パンフレット等の区切りに最適）
+                        score = distance * 0.6 + priority * 0.1
+                    elif break_char in ['（', '(']:
+                        # 括弧も比較的優先
+                        score = distance * 0.7 + priority * 0.1
+                    else:
+                        # その他の助詞等
+                        score = distance * 1.0 + priority * 0.2
+                    
+                    split_candidates.append((score, split_pos, break_char, pos))
                 
                 pos = text.find(break_char, pos + 1)
-            
-            # 句読点が見つかった場合は、他の分割点は探索しない
-            if best_split and break_char in punctuation_chars:
-                break
-            elif best_split:
-                break  # 優先順位の高い分割点が見つかったら終了
+        
+        # 最適な分割点を選択（スコアが最も低いもの）
+        if split_candidates:
+            split_candidates.sort(key=lambda x: x[0])  # スコアでソート
+            best_split = split_candidates[0][1]
         
         # 自然な分割点が見つからない場合、中央付近で分割
         if best_split is None:
