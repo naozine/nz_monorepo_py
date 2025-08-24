@@ -349,7 +349,7 @@ a4_css = f"""
   .pct-bar-fill {{ position: absolute; top: 0; left: 0; bottom: 0; background: #4c8bf5; display: flex; align-items: center; justify-content: flex-end; }}
   .pct-bar-label {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; text-shadow: 0 1px 0 rgba(255,255,255,0.6); }}
   .pct-in-bar {{ font-size: 8pt; color: white; margin-right: 4px; text-shadow: 0 1px 0 rgba(0,0,0,0.3); }}
-  .pct-external {{ font-size: 8pt; color: #333; margin-left: 6px; white-space: nowrap; }}
+  .pct-external {{ position: absolute; font-size: 8pt; color: #333; white-space: nowrap; top: 50%; transform: translateY(-50%); z-index: 10; }}
   .pct-bar-right {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; white-space: nowrap; }}
 
   /* 固定カラム幅（全ての.simpleテーブルで列幅を揃える）*/
@@ -919,8 +919,10 @@ class HTMLComponents:
                 # パーセンテージ表示位置を閾値で判定
                 if pct_val < self.config.percent_threshold_external:
                     # 棒グラフの外側（右）に黒系色で表示
+                    # 棒の終端位置を計算（幅 + 6pxのマージン）
+                    bar_end_position = f"{pct_val + 2}%"  # 棒の終端 + 2%のマージン
                     pct_display_in = ""
-                    pct_display_external = f"<span class=\"pct-external\">{pct_val}%</span>"
+                    pct_display_external = f"<span class=\"pct-external\" style=\"left:{bar_end_position};\">{pct_val}%</span>"
                 else:
                     # 棒グラフの中に白文字で表示
                     pct_display_in = f"<span class=\"pct-in-bar\">{pct_val}%</span>"
@@ -1547,7 +1549,7 @@ class ReportGenerator:
   .pct-bar-fill {{ position: absolute; top: 0; left: 0; bottom: 0; background: #4c8bf5; display: flex; align-items: center; justify-content: flex-end; }}
   .pct-bar-label {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; text-shadow: 0 1px 0 rgba(255,255,255,0.6); }}
   .pct-in-bar {{ font-size: 8pt; color: white; margin-right: 4px; text-shadow: 0 1px 0 rgba(0,0,0,0.3); }}
-  .pct-external {{ font-size: 8pt; color: #333; margin-left: 6px; white-space: nowrap; }}
+  .pct-external {{ position: absolute; font-size: 8pt; color: #333; white-space: nowrap; top: 50%; transform: translateY(-50%); z-index: 10; }}
   .pct-bar-right {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; white-space: nowrap; }}
   table.simple th:nth-child(1), table.simple td:nth-child(1) {{ width: 28%; }}
   table.simple th:nth-child(2), table.simple td:nth-child(2) {{ width: 18%; }}
