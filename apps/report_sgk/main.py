@@ -336,6 +336,13 @@ a4_css = f"""
   table.simple th {{ background: #f9fafb; color: #444; text-align: center; }}
   table.simple tfoot td {{ font-weight: 700; background: #fafafa; }}
   table.simple td.label {{ text-align: left; }}
+
+  /* 選択肢×区分 割合バー */
+  .option-pct td {{ vertical-align: middle; }}
+  .pct-bar {{ position: relative; height: 12px; background: #f2f4f8; border: 1px solid #d0d7e2; border-radius: 6px; overflow: hidden; }}
+  .pct-bar-fill {{ position: absolute; top: 0; left: 0; bottom: 0; background: #4c8bf5; }}
+  .pct-bar-label {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; text-shadow: 0 1px 0 rgba(255,255,255,0.6); }}
+
   /* 固定カラム幅（全ての.simpleテーブルで列幅を揃える）*/
   table.simple th:nth-child(1), table.simple td:nth-child(1) {{ width: 28%; }}
   table.simple th:nth-child(2), table.simple td:nth-child(2) {{ width: 18%; }}
@@ -966,6 +973,69 @@ def render_option_count_table(sub_label: str, header_label: str, frames: list[tu
 
     return f"<div class=\"q-subheading\">{escape_html(sub_label)}</div><table class=\"simple\">{thead}{tbody}</table>"
 
+# 選択肢ごと × 区分ごとの割合を横棒で示すテーブル（A/B/Cレイアウト風）
+# - 3列: 選択肢 | 区分（人数） | 割合（横棒）
+# - 各選択肢で行グループ化（rowspan）
+
+def render_option_category_pct_table(sub_label: str, frames: list[tuple[str, pd.DataFrame]], qcol: str, options: list[str], colors: dict) -> str:
+    if not frames or not options:
+        return ""
+
+    # ヘッダ
+    thead = (
+        "<thead><tr>"
+        "<th>選択肢</th>"
+        "<th>区分（人数）</th>"
+        "<th>割合</th>"
+        "</tr></thead>"
+    )
+
+    # 事前計算（各区分の分母）
+    frame_denoms = [(name, len(fr)) for name, fr in frames]
+    # 各区分ごとの選択肢カウント
+    per_frame_counts = []  # (name, counts)
+    for name, fr in frames:
+        counts, _S = aggregate_group(fr, qcol, options)
+        per_frame_counts.append((name, counts))
+
+    # name -> (counts, denom) lookup
+    counts_map = {name: counts for name, counts in per_frame_counts}
+    denom_map = {name: denom for name, denom in frame_denoms}
+
+    # 行生成
+    body_rows = []
+    for o in options:
+        first = True
+        # 表示対象の行数（全区分を表示。必要なら0件も表示）
+        for name, _ in frames:
+            denom = denom_map.get(name, 0)
+            num = counts_map.get(name, {}).get(o, 0)
+            pct_val = 0 if denom == 0 else round(num * 100.0 / denom, 1)
+            # A列
+            if first:
+                a_cell = f"<td class=\"label\" rowspan=\"{len(frames)}\">{escape_html(o)}</td>"
+                first = False
+            else:
+                a_cell = ""
+            # B列（区分名 = 人数）
+            b_text = f"{escape_html(name)} = {fmt_int(num)}人"
+            b_cell = f"<td>{b_text}</td>"
+            # C列（横棒）
+            bar_color = colors.get(o, "#4c8bf5")
+            c_cell = (
+                f"<td>"
+                f"  <div class=\"pct-bar\">"
+                f"    <div class=\"pct-bar-fill\" style=\"width:{pct_val}%;background:{bar_color};\"></div>"
+                f"    <div class=\"pct-bar-label\">{pct_val}%</div>"
+                f"  </div>"
+                f"</td>"
+            )
+            body_rows.append("<tr>" + a_cell + b_cell + c_cell + "</tr>")
+
+    tbody = "<tbody>" + "".join(body_rows) + "</tbody>"
+
+    return f"<div class=\"q-subheading\">{escape_html(sub_label)}</div><table class=\"simple option-pct\">{thead}{tbody}</table>"
+
 sections = []
 for idx, q in enumerate(question_columns):
     # 補足説明列が存在すれば、最初の非空データを拾って表示（角丸矩形の中に配置）
@@ -1048,6 +1118,7 @@ for idx, q in enumerate(question_columns):
     grade_html = render_group_bars("学年別", grade_frames, q, order, colors, unit)
 
     # テーブル（角丸矩形の直下に配置）
+    region_pct_table_html = render_option_category_pct_table("地域別（選択肢×地域の割合）", region_frames, q, order, colors)
     region_table_html = render_option_count_table("地域別", "地域", region_frames, q, order)
     grade_table_html = render_option_count_table("学年別", "学年", grade_frames, q, order)
 
@@ -1055,6 +1126,7 @@ for idx, q in enumerate(question_columns):
     <section class=\"page-break\">
       <h2>Q{idx+1} {escape_html(q)}</h2>
       {note_box_html}
+      {region_pct_table_html}
       {region_table_html}
       {grade_table_html}
       {legend_html}
