@@ -813,8 +813,257 @@ class HTMLComponents:
 
         return f"<div class=\"q-subheading\">{self.escape_html(sub_label)}</div><table class=\"simple option-pct region-pct\">{thead}{tbody}</table>"
 
-# HTMLComponentsインスタンスを作成
+
+# Phase 2: 特化コンポーネント
+class QuestionComponent(HTMLComponents):
+    """設問専用コンポーネント"""
+    
+    def alpha_label(self, i: int) -> str:
+        """A..Z, それ以降はAA, AB...（簡易実装）"""
+        letters = []
+        i0 = i
+        while True:
+            letters.append(chr(ord('A') + (i0 % 26)))
+            i0 = i0 // 26 - 1
+            if i0 < 0:
+                break
+        return "".join(reversed(letters))
+    
+    def render_question_header(self, idx: int, title: str, supplement: str, options: list) -> str:
+        """設問ヘッダー（タイトル + 補足 + 選択肢一覧）を生成"""
+        inner_sup = ""
+        if supplement:
+            inner_sup = f"<h3 class=\"supplement\">{preprocess_supplement_html(supplement)}</h3>"
+        
+        options_html = ""
+        if options:
+            items = []
+            for i, opt in enumerate(options):
+                label = self.alpha_label(i)
+                items.append(f"<span class=\"option-item\">【{label}】{self.escape_html(opt)}</span>")
+            options_html = f"<div class=\"options\">{''.join(items)}</div>"
+        
+        note_box_html = f"<div class=\"note-box\">{inner_sup}<h3>選択肢</h3>{options_html}</div>"
+        
+        return f"""
+        <h2>Q{idx+1} {self.escape_html(title)}</h2>
+        {note_box_html}
+        """
+    
+    def render_question_analysis(self, q: str, opts: list, overall_counts: dict, S_overall: int, 
+                                order: list, colors: dict, unit: str, 
+                                region_frames: list, grade_frames: list,
+                                df_eff_param: pd.DataFrame, n_total_param: int) -> str:
+        """設問の分析部分（テーブル + グラフ + 凡例）を生成"""
+        
+        # 単一/複数の判定と説明文
+        multi = is_multiselect(df_eff_param, q)
+        if multi:
+            explain_text = "以下のグラフの割合は、各区分の選択回数の合計を母数とし、合計は100%になります\n棒の右の数値は、その区分の合計回数です。"
+        else:
+            explain_text = "以下のグラフの割合は、各区分の回答者数を母数にしています。棒の右の数値は、その区分の合計人数です。"
+        
+        # 全体棒
+        overall_bar_html = ""
+        if S_overall > 0:
+            overall_suffix = "回" if unit.endswith("回中") else "人"
+            overall_label = f"全体 = {S_overall:,}{overall_suffix}"
+            overall_bar_html = f"<div><div class=\"muted\" style=\"margin-bottom:0.3mm;\">{overall_label}</div>{self.render_stacked_bar('全体', overall_counts, order, colors, unit, show_total_right=False)}</div>"
+        else:
+            overall_bar_html = "<div><div class=\"muted\">データなし</div></div>"
+        
+        legend_html = self.render_legend(order, colors)
+        explain_html = f"<div class=\"muted\" style=\"margin:2mm 0 2mm; white-space: pre-wrap;\">{self.escape_html(explain_text)}</div>"
+        
+        # 地域別・学年別
+        region_html = self.render_group_bars("地域別", region_frames, q, order, colors, unit)
+        grade_html = self.render_group_bars("学年別", grade_frames, q, order, colors, unit)
+        
+        # テーブル
+        region_pct_table_html = self.render_option_category_pct_table("地域別（選択肢×地域の割合）", region_frames, q, order, colors)
+        region_table_html = self.render_option_count_table("地域別", "地域", region_frames, q, order, df_eff_param, n_total_param)
+        grade_table_html = self.render_option_count_table("学年別", "学年", grade_frames, q, order, df_eff_param, n_total_param)
+        
+        return f"""
+        {region_pct_table_html}
+        {region_table_html}
+        {grade_table_html}
+        {legend_html}
+        {explain_html}
+        <div class="q-subheading">全体</div>
+        {overall_bar_html}
+        {region_html}
+        {grade_html}
+        """
+    
+    def render_question_section(self, idx: int, q: str, df: pd.DataFrame, df_eff: pd.DataFrame, n_total: int) -> str:
+        """設問セクション全体を生成"""
+        # 補足説明列が存在すれば、最初の非空データを拾って表示
+        supp_col = f"補足説明{q}"
+        supplement = ""
+        if supp_col in df.columns:
+            first_val = first_non_empty_value(df[supp_col])
+            if first_val is not None:
+                supplement = first_val
+        
+        # 設問の選択肢（ユニーク）を取得
+        opts = get_question_options(df, q)
+        
+        # オプションなしの場合はスキップ
+        if not opts:
+            header_html = self.render_question_header(idx, q, supplement, opts)
+            return f"""<section class="page-break">{header_html}<div class="muted">データなし</div></section>"""
+        
+        # 集計：全体
+        overall_counts, S_overall = aggregate_group(df_eff, q, opts)
+        # 並び順（全体割合降順。同率は辞書順。その他は最後）
+        order = order_options_by_overall(overall_counts, S_overall)
+        # 色割当（設問内で固定）
+        colors = color_map_for_options(order)
+        
+        # 単位
+        multi = is_multiselect(df_eff, q)
+        unit = "回中" if multi else "人中"
+        
+        # 地域別・学年別フレーム
+        region_frames = [(lab, df_eff[df_eff["region_bucket"] == lab]) for lab in self.region_order]
+        grade_frames = [(lab, df_eff[df_eff["grade_2024"] == lab]) for lab in self.grade_order]
+        
+        # ヘッダーと分析部分を組み合わせ
+        header_html = self.render_question_header(idx, q, supplement, opts)
+        analysis_html = self.render_question_analysis(q, opts, overall_counts, S_overall, order, colors, unit, 
+                                                    region_frames, grade_frames, df_eff, n_total)
+        
+        return f"""<section class="page-break">{header_html}{analysis_html}</section>"""
+
+
+class DemographicsComponent(HTMLComponents):
+    """回答者属性専用コンポーネント"""
+    
+    def render_overview_section(self, organizer: str, survey_name: str, participating_schools: str, 
+                               venue: str, event_dates: str, n_total: int, n_preschool: int) -> str:
+        """概要セクションを生成"""
+        return f"""
+        <header>
+            <div class="title">
+                <div class="line1">{organizer}</div>
+                <div class="line2">{survey_name}</div>
+            </div>
+        </header>
+
+        <section>
+            <h2>概要</h2>
+            <div class="overview-list">
+                <div class="label">参加校</div>
+                <div class="value">{participating_schools}</div>
+                <div class="label">会場</div>
+                <div class="value">{venue}</div>
+                <div class="label">開催日</div>
+                <div class="value">{event_dates}</div>
+                <div class="label">アンケート回答数</div>
+                <div class="value">{n_total:,}組（未就学児{n_preschool:,}組を除く）</div>
+            </div>
+        </section>
+        """
+    
+    def render_gender_table(self, ct: pd.DataFrame, row_totals: pd.Series, row_pct: pd.Series, 
+                           col_totals: pd.Series, grand_total: int) -> str:
+        """男女別テーブルを生成"""
+        return f"""
+        <h3>男女別</h3>
+        <table class="simple">
+            <thead>
+                <tr>
+                    <th></th>
+                    <th>小学校</th>
+                    <th>中学校</th>
+                    <th>合計</th>
+                    <th>割合</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="label">男性</td>
+                    <td>{fmt_int(ct.loc['男性','小学校'])}</td>
+                    <td>{fmt_int(ct.loc['男性','中学校'])}</td>
+                    <td>{fmt_int(row_totals.loc['男性'])}</td>
+                    <td>{row_pct.loc['男性']}%</td>
+                </tr>
+                <tr>
+                    <td class="label">女性</td>
+                    <td>{fmt_int(ct.loc['女性','小学校'])}</td>
+                    <td>{fmt_int(ct.loc['女性','中学校'])}</td>
+                    <td>{fmt_int(row_totals.loc['女性'])}</td>
+                    <td>{row_pct.loc['女性']}%</td>
+                </tr>
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td class="label">合計</td>
+                    <td>{fmt_int(col_totals.loc['小学校'])}</td>
+                    <td>{fmt_int(col_totals.loc['中学校'])}</td>
+                    <td>{fmt_int(grand_total)}</td>
+                    <td>100%</td>
+                </tr>
+            </tfoot>
+        </table>
+        """
+    
+    def render_region_table(self, region_ct: pd.DataFrame, region_row_totals: pd.Series, region_row_pct: pd.Series, 
+                           region_col_totals: pd.Series, grand_total: int) -> str:
+        """地域別テーブルを生成"""
+        region_rows_html = "\n".join([
+            f"          <tr>\n            <td class=\"label\">{label}</td>\n            <td>{fmt_int(region_ct.loc[label, '小学校'])}</td>\n            <td>{fmt_int(region_ct.loc[label, '中学校'])}</td>\n            <td>{fmt_int(region_row_totals.loc[label])}</td>\n            <td>{region_row_pct.loc[label]}%</td>\n          </tr>"
+            for label in self.region_order
+        ])
+        
+        return f"""
+        <h3>地域別</h3>
+        <table class="simple">
+            <thead>
+                <tr>
+                    <th></th>
+                    <th>小学校</th>
+                    <th>中学校</th>
+                    <th>合計</th>
+                    <th>割合</th>
+                </tr>
+            </thead>
+            <tbody>
+{region_rows_html}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td class="label">合計</td>
+                    <td>{fmt_int(region_col_totals.loc['小学校'])}</td>
+                    <td>{fmt_int(region_col_totals.loc['中学校'])}</td>
+                    <td>{fmt_int(grand_total)}</td>
+                    <td>100%</td>
+                </tr>
+            </tfoot>
+        </table>
+        """
+    
+    def render_demographics_section(self, ct: pd.DataFrame, row_totals: pd.Series, row_pct: pd.Series, 
+                                  col_totals: pd.Series, region_ct: pd.DataFrame, region_row_totals: pd.Series,
+                                  region_row_pct: pd.Series, region_col_totals: pd.Series, grand_total: int) -> str:
+        """回答者属性セクション全体を生成"""
+        gender_table_html = self.render_gender_table(ct, row_totals, row_pct, col_totals, grand_total)
+        region_table_html = self.render_region_table(region_ct, region_row_totals, region_row_pct, region_col_totals, grand_total)
+        
+        return f"""
+        <section>
+            <h2>回答者属性</h2>
+            {gender_table_html}
+            {region_table_html}
+        </section>
+        """
+
+
+# 特化コンポーネントのインスタンスを作成
 html_components = HTMLComponents(styles=a4_css)
+question_component = QuestionComponent(styles=a4_css)
+demographics_component = DemographicsComponent(styles=a4_css)
 
 # HTML出力直前に設問一覧を取得してコンソール出力
 question_columns = get_question_columns(df)
@@ -1383,107 +1632,10 @@ def render_option_category_pct_table(sub_label: str, frames: list[tuple[str, pd.
 
     return f"<div class=\"q-subheading\">{escape_html(sub_label)}</div><table class=\"simple option-pct region-pct\">{thead}{tbody}</table>"
 
+# 設問セクションを生成（新しいQuestionComponentを使用）
 sections = []
 for idx, q in enumerate(question_columns):
-    # 補足説明列が存在すれば、最初の非空データを拾って表示（角丸矩形の中に配置）
-    supp_col = f"補足説明{q}"
-    inner_sup = ""
-    if supp_col in df.columns:
-        first_val = first_non_empty_value(df[supp_col])
-        if first_val is not None:
-            inner_sup = f"<h3 class=\"supplement\">{preprocess_supplement_html(first_val)}</h3>"
-
-    # 設問の選択肢（ユニーク）を取得して列挙
-    opts = get_question_options(df, q)
-    def alpha_label(i: int) -> str:
-        # A..Z, それ以降はAA, AB...（簡易実装）
-        letters = []
-        i0 = i
-        while True:
-            letters.append(chr(ord('A') + (i0 % 26)))
-            i0 = i0 // 26 - 1
-            if i0 < 0:
-                break
-        return "".join(reversed(letters))
-
-    options_html = ""
-    if opts:
-        items = []
-        for i, opt in enumerate(opts):
-            label = alpha_label(i)
-            items.append(f"<span class=\"option-item\">【{label}】{html_components.escape_html(opt)}</span>")
-        options_html = f"<div class=\"options\">{''.join(items)}</div>"
-
-    note_box_html = f"<div class=\"note-box\">{inner_sup}<h3>選択肢</h3>{options_html}</div>"
-
-    # オプションなしの場合はスキップ（安全）
-    if not opts:
-        section_html = f"""
-        <section class=\"page-break\">
-          <h2>Q{idx+1} {q}</h2>
-          {note_box_html}
-          <div class=\"muted\">データなし</div>
-        </section>
-        """.strip()
-        sections.append(section_html)
-        continue
-
-    # 集計：全体
-    overall_counts, S_overall = aggregate_group(df_eff, q, opts)
-    # 並び順（全体割合降順。同率は辞書順。その他は最後）
-    order = order_options_by_overall(overall_counts, S_overall)
-    # 色割当（設問内で固定）
-    colors = color_map_for_options(order)
-
-    # 単一/複数の判定と単位・説明文
-    multi = is_multiselect(df_eff, q)
-    unit = "回中" if multi else "人中"
-    if multi:
-        explain_text = "以下のグラフの割合は、各区分の選択回数の合計を母数とし、合計は100%になります\n棒の右の数値は、その区分の合計回数です。"
-    else:
-        explain_text = "以下のグラフの割合は、各区分の回答者数を母数にしています。棒の右の数値は、その区分の合計人数です。"
-
-    # 全体棒（他と同じネスト構造にして開始位置を揃える）
-    overall_bar_html = ""
-    if S_overall > 0:
-        # 全体も他のサブセクションと同様にラベルに合計を表示し、右側の合計は非表示
-        overall_suffix = "回" if unit.endswith("回中") else "人"
-        overall_label = f"全体 = {S_overall:,}{overall_suffix}"
-        overall_bar_html = f"<div><div class=\"muted\" style=\"margin-bottom:0.3mm;\">{overall_label}</div>{html_components.render_stacked_bar('全体', overall_counts, order, colors, unit, show_total_right=False)}</div>"
-    else:
-        overall_bar_html = "<div><div class=\"muted\">データなし</div></div>"
-
-    legend_html = html_components.render_legend(order, colors)
-    explain_html = f"<div class=\"muted\" style=\"margin:2mm 0 2mm; white-space: pre-wrap;\">{html_components.escape_html(explain_text)}</div>"
-
-    # 地域別
-    region_frames = [(lab, df_eff[df_eff["region_bucket"] == lab]) for lab in html_components.region_order]
-    region_html = html_components.render_group_bars("地域別", region_frames, q, order, colors, unit)
-
-    # 学年別
-    grade_frames = [(lab, df_eff[df_eff["grade_2024"] == lab]) for lab in html_components.grade_order]
-    grade_html = html_components.render_group_bars("学年別", grade_frames, q, order, colors, unit)
-
-    # テーブル（角丸矩形の直下に配置）
-    region_pct_table_html = html_components.render_option_category_pct_table("地域別（選択肢×地域の割合）", region_frames, q, order, colors)
-    region_table_html = html_components.render_option_count_table("地域別", "地域", region_frames, q, order, df_eff, n_total)
-    grade_table_html = html_components.render_option_count_table("学年別", "学年", grade_frames, q, order, df_eff, n_total)
-
-    section_html = f"""
-    <section class=\"page-break\">
-      <h2>Q{idx+1} {html_components.escape_html(q)}</h2>
-      {note_box_html}
-      {region_pct_table_html}
-      {region_table_html}
-      {grade_table_html}
-      {legend_html}
-      {explain_html}
-      <div class=\"q-subheading\">全体</div>
-      {overall_bar_html}
-      {region_html}
-      {grade_html}
-    </section>
-    """.strip()
+    section_html = question_component.render_question_section(idx, q, df, df_eff, n_total)
     sections.append(section_html)
 
 question_sections_html = "\n".join(sections)
@@ -1494,6 +1646,15 @@ survey_name = os.getenv("REPORT_SURVEY_NAME", "サンプルイベント名")
 participating_schools = os.getenv("REPORT_PARTICIPATING_SCHOOLS", "参加校 100校")
 venue = os.getenv("REPORT_VENUE", "サンプル会場 A")
 event_dates = os.getenv("REPORT_EVENT_DATES", "9月1日（日）")
+
+# 新しいDemographicsComponentを使用してHTML構築
+overview_html = demographics_component.render_overview_section(
+    organizer, survey_name, participating_schools, venue, event_dates, n_total, n_preschool
+)
+demographics_html = demographics_component.render_demographics_section(
+    ct, row_totals, row_pct, col_totals, region_ct, region_row_totals, 
+    region_row_pct, region_col_totals, grand_total
+)
 
 html = f"""
 <!doctype html>
@@ -1508,95 +1669,9 @@ html = f"""
 </head>
 <body>
   <div class=\"page\">
-    <header>
-      <div class="title">
-        <div class="line1">{organizer}</div>
-        <div class="line2">{survey_name}</div>
-      </div>
-    </header>
-
-    <section>
-      <h2>概要</h2>
-      <div class=\"overview-list\">
-        <div class=\"label\">参加校</div>
-        <div class=\"value\">{participating_schools}</div>
-        <div class=\"label\">会場</div>
-        <div class=\"value\">{venue}</div>
-        <div class=\"label\">開催日</div>
-        <div class=\"value\">{event_dates}</div>
-        <div class=\"label\">アンケート回答数</div>
-        <div class=\"value\">{n_total:,}組（未就学児{n_preschool:,}組を除く）</div>
-      </div>
-    </section>
-
-    <section>
-      <h2>回答者属性</h2>
-      <h3>男女別</h3>
-      <table class="simple">
-        <thead>
-          <tr>
-            <th></th>
-            <th>小学校</th>
-            <th>中学校</th>
-            <th>合計</th>
-            <th>割合</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td class="label">男性</td>
-            <td>{fmt_int(ct.loc['男性','小学校'])}</td>
-            <td>{fmt_int(ct.loc['男性','中学校'])}</td>
-            <td>{fmt_int(row_totals.loc['男性'])}</td>
-            <td>{row_pct.loc['男性']}%</td>
-          </tr>
-          <tr>
-            <td class="label">女性</td>
-            <td>{fmt_int(ct.loc['女性','小学校'])}</td>
-            <td>{fmt_int(ct.loc['女性','中学校'])}</td>
-            <td>{fmt_int(row_totals.loc['女性'])}</td>
-            <td>{row_pct.loc['女性']}%</td>
-          </tr>
-        </tbody>
-        <tfoot>
-          <tr>
-            <td class="label">合計</td>
-            <td>{fmt_int(col_totals.loc['小学校'])}</td>
-            <td>{fmt_int(col_totals.loc['中学校'])}</td>
-            <td>{fmt_int(grand_total)}</td>
-            <td>100%</td>
-          </tr>
-        </tfoot>
-      </table>
-
-      <h3>地域別</h3>
-      <table class="simple">
-        <thead>
-          <tr>
-            <th></th>
-            <th>小学校</th>
-            <th>中学校</th>
-            <th>合計</th>
-            <th>割合</th>
-          </tr>
-        </thead>
-        <tbody>
-{region_rows_html}
-        </tbody>
-        <tfoot>
-          <tr>
-            <td class="label">合計</td>
-            <td>{fmt_int(region_col_totals.loc['小学校'])}</td>
-            <td>{fmt_int(region_col_totals.loc['中学校'])}</td>
-            <td>{fmt_int(grand_total)}</td>
-            <td>100%</td>
-          </tr>
-        </tfoot>
-      </table>
-    </section>
-
+    {overview_html}
+    {demographics_html}
     {question_sections_html}
-
   </div>
 </body>
 </html>
