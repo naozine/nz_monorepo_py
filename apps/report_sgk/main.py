@@ -349,6 +349,7 @@ a4_css = f"""
   .pct-bar-fill {{ position: absolute; top: 0; left: 0; bottom: 0; background: #4c8bf5; display: flex; align-items: center; justify-content: flex-end; }}
   .pct-bar-label {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; text-shadow: 0 1px 0 rgba(255,255,255,0.6); }}
   .pct-in-bar {{ font-size: 8pt; color: white; margin-right: 4px; text-shadow: 0 1px 0 rgba(0,0,0,0.3); }}
+  .pct-external {{ font-size: 8pt; color: #333; margin-left: 6px; white-space: nowrap; }}
   .pct-bar-right {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; white-space: nowrap; }}
 
   /* 固定カラム幅（全ての.simpleテーブルで列幅を揃える）*/
@@ -515,6 +516,8 @@ class ComponentConfig:
     ])
     # 長い選択肢テキストの改行設定
     max_option_text_length: int = 12
+    # パーセンテージ表示の閾値設定（この値より小さい場合は棒グラフの外側に表示）
+    percent_threshold_external: float = 7.0
 
 # HTMLComponents基底クラス（Phase 1: 基底コンポーネント作成）
 class HTMLComponents:
@@ -912,10 +915,22 @@ class HTMLComponents:
                 b_cell = f"<td>{b_text}</td>"
                 # C列（横棒）
                 bar_color = colors.get(o, "#4c8bf5")
+                
+                # パーセンテージ表示位置を閾値で判定
+                if pct_val < self.config.percent_threshold_external:
+                    # 棒グラフの外側（右）に黒系色で表示
+                    pct_display_in = ""
+                    pct_display_external = f"<span class=\"pct-external\">{pct_val}%</span>"
+                else:
+                    # 棒グラフの中に白文字で表示
+                    pct_display_in = f"<span class=\"pct-in-bar\">{pct_val}%</span>"
+                    pct_display_external = ""
+                
                 c_cell = (
                     f"<td>"
                     f"  <div class=\"pct-bar\">"
-                    f"    <div class=\"pct-bar-fill\" style=\"width:{pct_val}%;background:{bar_color};\"><span class=\"pct-in-bar\">{pct_val}%</span></div>"
+                    f"    <div class=\"pct-bar-fill\" style=\"width:{pct_val}%;background:{bar_color};\">{pct_display_in}</div>"
+                    f"    {pct_display_external}"
                     f"    <div class=\"pct-bar-right\">{num} / {denom} (人)</div>"
                     f"  </div>"
                     f"</td>"
@@ -1532,6 +1547,7 @@ class ReportGenerator:
   .pct-bar-fill {{ position: absolute; top: 0; left: 0; bottom: 0; background: #4c8bf5; display: flex; align-items: center; justify-content: flex-end; }}
   .pct-bar-label {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; text-shadow: 0 1px 0 rgba(255,255,255,0.6); }}
   .pct-in-bar {{ font-size: 8pt; color: white; margin-right: 4px; text-shadow: 0 1px 0 rgba(0,0,0,0.3); }}
+  .pct-external {{ font-size: 8pt; color: #333; margin-left: 6px; white-space: nowrap; }}
   .pct-bar-right {{ position: absolute; top: 50%; right: 6px; transform: translateY(-50%); font-size: 8pt; color: #333; white-space: nowrap; }}
   table.simple th:nth-child(1), table.simple td:nth-child(1) {{ width: 28%; }}
   table.simple th:nth-child(2), table.simple td:nth-child(2) {{ width: 18%; }}
@@ -1634,6 +1650,14 @@ def main():
         _load_env_from_dotenv()
         report_config = ReportConfig.from_env()
         component_config = ComponentConfig()
+        
+        # 環境変数からパーセンテージ閾値を読み込み
+        threshold_env = os.getenv('PERCENT_THRESHOLD_EXTERNAL', '7')
+        try:
+            component_config.percent_threshold_external = float(threshold_env)
+        except ValueError:
+            print(f"警告: PERCENT_THRESHOLD_EXTERNAL の値が不正です: {threshold_env}. デフォルト値 7 を使用します。")
+            component_config.percent_threshold_external = 7.0
         
         # レポートジェネレーターを作成して実行
         generator = ReportGenerator(report_config, component_config)
