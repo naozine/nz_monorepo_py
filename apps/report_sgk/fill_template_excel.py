@@ -87,7 +87,7 @@ def get_survey_data_value(survey_data_type: str, excel_path: Union[str, Path] = 
 
 def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "survey.xlsx") -> List[int]:
     """
-    指定のシリーズ種別に応じて、学年別の人数配列を返します。
+    指定のシリーズ種別に応じて、人数配列を返します。
     
     サポートする series_type:
       - "elementary_boys": 小1〜小6の男子の回答者数（6個）
@@ -96,8 +96,10 @@ def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "sur
       - "junior_girls": 中1〜中3の女子の回答者数（3個）
       - "region_grades:<地域名>": 指定地域の小1〜中3の回答者数（9個）
         例: "region_grades:東京23区" / "region_grades:三多摩島しょ" / "region_grades:埼玉県" など
+      - "responses:q=<番号>;choice=<選択肢>;class=<grade|region>": 指定設問の特定選択肢の回答数を、学年または地域の順で返す
+        例: "responses:q=1;choice=知っている;class=grade"
     
-    :return: 各学年の人数リスト（順序は学年の昇順）
+    :return: 人数リスト（series_typeに応じた順序）
     """
     if ReportDataPreparator is None:
         raise RuntimeError("main.py からのインポートが失敗しているため、survey_series 機能は利用できません。")
@@ -114,6 +116,88 @@ def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "sur
             if nm == "東京都下":
                 return "三多摩島しょ"
             return nm
+
+        # 新機能: 設問×選択肢の回答数シリーズ（学年または地域の順）
+        if series_type.startswith("responses"):
+            # 記法: "responses:q=<番号>;choice=<選択肢>;class=<grade|region>"
+            # パーズ
+            params_str = ""
+            parts = series_type.split(":", 1)
+            if len(parts) == 2:
+                params_str = parts[1]
+            # セミコロン区切りの key=value
+            params: Dict[str, str] = {}
+            if params_str:
+                for token in params_str.split(";"):
+                    if "=" in token:
+                        k, v = token.split("=", 1)
+                        params[k.strip().lower()] = v.strip()
+            # 必須の3要素
+            q_str = params.get("q") or params.get("question")
+            choice = params.get("choice")
+            class_type = params.get("class")
+            if not q_str or not choice or not class_type:
+                raise ValueError("responses シリーズには q(またはquestion) / choice / class を指定してください。例: responses:q=1;choice=知っている;class=grade")
+            try:
+                q_idx = int(q_str)
+            except Exception:
+                raise ValueError(f"responses の q は整数で指定してください（指定値: {q_str}）")
+            class_type = class_type.lower()
+            if class_type not in ("grade", "region"):
+                raise ValueError("responses の class は 'grade' または 'region' を指定してください。")
+
+            # 設問列名の解決（1開始）
+            questions = processed_data.question_columns
+            if q_idx < 1 or q_idx > len(questions):
+                raise IndexError(f"responses: question 番号が範囲外です（1〜{len(questions)}）。指定: {q_idx}")
+            qcol = questions[q_idx - 1]
+            if qcol not in df.columns:
+                raise RuntimeError(f"指定の設問列が見つかりません: {qcol}")
+
+            # セルから選択肢集合を得る関数（改行区切りにも対応）
+            def cell_to_set(val) -> set:
+                if val is None:
+                    return set()
+                try:
+                    import pandas as _pd  # 局所importでNaN検出
+                    if _pd.isna(val):
+                        return set()
+                except Exception:
+                    pass
+                s = str(val).strip()
+                if not s:
+                    return set()
+                import re as _re
+                parts = _re.split(r"[\r\n]+", s)
+                return {p.strip() for p in parts if p.strip()}
+
+            # 集計
+            if class_type == "grade":
+                order = ["小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "中3"]
+                if "grade_2024" not in df.columns:
+                    raise RuntimeError("必要な列 'grade_2024' が見つかりません。")
+                counts: List[int] = []
+                for g in order:
+                    sub = df[df["grade_2024"] == g]
+                    n = 0
+                    for v in sub[qcol].dropna():
+                        if choice in cell_to_set(v):
+                            n += 1
+                    counts.append(int(n))
+                return counts
+            else:
+                order = ["東京23区", "三多摩島しょ", "埼玉県", "神奈川県", "千葉県", "その他"]
+                if "region_bucket" not in df.columns:
+                    raise RuntimeError("必要な列 'region_bucket' が見つかりません。")
+                counts: List[int] = []
+                for r in order:
+                    sub = df[df["region_bucket"] == r]
+                    n = 0
+                    for v in sub[qcol].dropna():
+                        if choice in cell_to_set(v):
+                            n += 1
+                    counts.append(int(n))
+                return counts
 
         # 地域シリーズ（region_grades:...）の特別処理
         if series_type.startswith("region_grades"):
@@ -257,6 +341,15 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
         # direction: right  # 省略可（未指定なら右）
         # または、region_grades:東京23区 のように survey_series に地域名を含めても可
 
+      # 追加機能: 指定設問の指定選択肢の回答数（学年または地域ごと）を縦方向に書き込み
+      - sheet: Q1
+        cell: T10
+        survey_series: responses
+        question: 1          # main.py の設問一覧順（1開始）
+        choice: 知っている
+        class: grade         # grade | region
+        # direction: down    # 省略可（responses は縦方向がデフォルト）
+
     :param config_path: YAML ファイルへのパス
     :return: 出力されたファイルの Path
     """
@@ -342,6 +435,19 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                     series_type = f"region_grades:{str(region_param).strip()}"
                 else:
                     raise ValueError(f"writes[{i}] の region_grades には 'region' キーで地域名を指定してください（例: region: 東京23区）。")
+
+            # responses の補完（question / choice / class を付与）
+            if isinstance(series_type, str) and series_type.strip() == "responses":
+                q = w.get("question")
+                ch = w.get("choice")
+                cls = w.get("class")
+                if q is None or ch is None or cls is None:
+                    raise ValueError(f"writes[{i}] の responses には question / choice / class を指定してください。")
+                try:
+                    q_int = int(q)
+                except Exception:
+                    raise ValueError(f"writes[{i}] の question は整数で指定してください（指定値: {q}）。")
+                series_type = f"responses:q={q_int};choice={str(ch).strip()};class={str(cls).strip()}"
 
             # 連続セルにシリーズを書き込み
             # 方向のデフォルト: 通常は down、region_grades は right
