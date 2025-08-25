@@ -79,6 +79,42 @@ def map_answer_columns(frame: pd.DataFrame) -> pd.DataFrame:
 
 df = map_answer_columns(df)
 
+# 2.5) ランキング質問の集約処理
+def aggregate_ranking_questions(frame: pd.DataFrame) -> pd.DataFrame:
+    ranking_cols = [
+        "各校のブースで1番知りたい内容を選んでください",
+        "各校のブースで2番目に知りたい内容を選んでください", 
+        "各校のブースで3番目に知りたい内容を選んでください"
+    ]
+    
+    # 対象列が存在するかチェック
+    existing_cols = [col for col in ranking_cols if col in frame.columns]
+    if len(existing_cols) < 2:
+        return frame
+    
+    # 新しい統合列の名前
+    aggregated_col = "各校のブースで知りたい内容を順に３つまで選んでください"
+    
+    # 各行でランキング順に結合
+    def combine_rankings(row):
+        values = []
+        for col in existing_cols:
+            val = row[col]
+            if pd.notna(val) and str(val).strip():
+                values.append(str(val).strip())
+        return "\n".join(values) if values else np.nan
+    
+    # 新しい列を作成
+    frame = frame.copy()
+    frame[aggregated_col] = frame.apply(combine_rankings, axis=1)
+    
+    # 元の列を削除
+    frame = frame.drop(columns=existing_cols)
+    
+    return frame
+
+df = aggregate_ranking_questions(df)
+
 # 3) 文字列のトリミング・NaN整備（最低限）
 def strip_series(s: pd.Series) -> pd.Series:
     return s.astype(str).str.replace(r"\u3000", " ", regex=True).str.strip().replace({"nan": np.nan})
@@ -1235,6 +1271,9 @@ class ReportDataPreparator:
         # 2) 「回答」列の例外的な処理
         df = self.map_answer_columns(df)
         
+        # 2.5) ランキング質問の集約処理
+        df = self.aggregate_ranking_questions(df)
+        
         # 3) 文字列のトリミング・NaN整備
         df = self.clean_string_data(df)
         
@@ -1329,6 +1368,40 @@ class ReportDataPreparator:
                 new_names[i] = original_left
         rename_map = {old: new for old, new in zip(cols, new_names) if old != new}
         return frame.rename(columns=rename_map)
+    
+    def aggregate_ranking_questions(self, frame: pd.DataFrame) -> pd.DataFrame:
+        """ランキング質問の集約処理"""
+        ranking_cols = [
+            "各校のブースで1番知りたい内容を選んでください",
+            "各校のブースで2番目に知りたい内容を選んでください", 
+            "各校のブースで3番目に知りたい内容を選んでください"
+        ]
+        
+        # 対象列が存在するかチェック
+        existing_cols = [col for col in ranking_cols if col in frame.columns]
+        if len(existing_cols) < 2:
+            return frame
+        
+        # 新しい統合列の名前
+        aggregated_col = "各校のブースで知りたい内容を順に３つまで選んでください"
+        
+        # 各行でランキング順に結合
+        def combine_rankings(row):
+            values = []
+            for col in existing_cols:
+                val = row[col]
+                if pd.notna(val) and str(val).strip():
+                    values.append(str(val).strip())
+            return "\n".join(values) if values else np.nan
+        
+        # 新しい列を作成
+        frame = frame.copy()
+        frame[aggregated_col] = frame.apply(combine_rankings, axis=1)
+        
+        # 元の列を削除
+        frame = frame.drop(columns=existing_cols)
+        
+        return frame
     
     def clean_string_data(self, df: pd.DataFrame) -> pd.DataFrame:
         def strip_series(s: pd.Series) -> pd.Series:
