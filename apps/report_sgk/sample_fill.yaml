@@ -8,3 +8,12 @@ writes:
     row: 15
     column: AD
     value: ZZZ
+  - sheet: p1
+    cell: B5
+    survey_data: total_responses      # 総回答者数
+  - sheet: p1
+    cell: B6
+    survey_data: invalid_responses    # 無効回答者数
+  - sheet: p1
+    cell: B7
+    survey_data: effective_responses  # 有効回答者数

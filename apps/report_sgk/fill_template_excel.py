@@ -14,6 +14,13 @@ try:
 except Exception as e:  # pragma: no cover
     yaml = None
 
+try:
+    from main import ReportDataPreparator, ReportConfig, ProcessedData
+except Exception as e:  # pragma: no cover
+    print(f"警告: main.py からのインポートに失敗しました: {e}")
+    print("survey_data 機能は利用できません。")
+    ReportDataPreparator = None
+
 
 def fill_ac14(template_path: Union[str, Path], output_path: Union[str, Path], value: str = "xxx") -> Path:
     """
@@ -44,6 +51,38 @@ def fill_ac14(template_path: Union[str, Path], output_path: Union[str, Path], va
     return out
 
 
+def get_survey_data_value(survey_data_type: str, excel_path: Union[str, Path] = "survey.xlsx") -> Any:
+    """
+    survey_data_type に応じて、main.py の集計データから値を取得します。
+    
+    :param survey_data_type: 取得するデータタイプ
+        - "total_responses": 総回答者数
+        - "invalid_responses": 無効回答者数（未就学児等）
+        - "effective_responses": 有効回答者数
+    :param excel_path: アンケートExcelファイルのパス
+    :return: 対応する値
+    """
+    if ReportDataPreparator is None:
+        raise RuntimeError("main.py からのインポートが失敗しているため、survey_data 機能は利用できません。")
+    
+    try:
+        config = ReportConfig()
+        preparator = ReportDataPreparator(config)
+        processed_data: ProcessedData = preparator.prepare_data(Path(excel_path))
+        
+        if survey_data_type == "total_responses":
+            return processed_data.n_total + processed_data.n_preschool
+        elif survey_data_type == "invalid_responses":
+            return processed_data.n_preschool
+        elif survey_data_type == "effective_responses":
+            return processed_data.n_total
+        else:
+            raise ValueError(f"不明な survey_data_type: {survey_data_type}")
+            
+    except Exception as e:
+        raise RuntimeError(f"集計データの取得に失敗しました: {e}")
+
+
 def fill_from_yaml(config_path: Union[str, Path]) -> Path:
     """
     YAML 設定を読み込み、指定のシート/セルへ値を書き込みます。
@@ -52,6 +91,7 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
 
     template: report_template.xlsx
     output: report_result.xlsx
+    survey_excel: survey.xlsx  # オプション：アンケートExcelファイルのパス
     writes:
       - sheet: p1
         cell: AC14
@@ -60,6 +100,15 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
         row: 5
         column: B   # または 2 （数値でも可）
         value: Hello
+      - sheet: p1
+        cell: B10
+        survey_data: total_responses      # 総回答者数
+      - sheet: p1
+        cell: B11
+        survey_data: invalid_responses    # 無効回答者数
+      - sheet: p1
+        cell: B12
+        survey_data: effective_responses  # 有効回答者数
 
     :param config_path: YAML ファイルへのパス
     :return: 出力されたファイルの Path
@@ -81,6 +130,7 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
     template = data.get("template")
     output = data.get("output")
     writes = data.get("writes")
+    survey_excel = data.get("survey_excel", "survey.xlsx")  # デフォルトは survey.xlsx
 
     if not template:
         raise ValueError("YAML に 'template' が必要です。")
@@ -93,6 +143,7 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
     base = cpath.parent
     tpath = (base / template) if not Path(str(template)).is_absolute() else Path(str(template))
     out = (base / output) if not Path(str(output)).is_absolute() else Path(str(output))
+    survey_path = (base / survey_excel) if not Path(str(survey_excel)).is_absolute() else Path(str(survey_excel))
 
     if not tpath.exists():
         raise FileNotFoundError(f"テンプレートが見つかりません: {tpath}")
@@ -124,9 +175,26 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                     raise ValueError(f"writes[{i}] の column が不正です。")
             addr = f"{col_letter}{int(row)}"
 
+        # 値の取得: value または survey_data のいずれか
         value = w.get("value")
+        survey_data_type = w.get("survey_data")
+        
+        if value is not None and survey_data_type is not None:
+            raise ValueError(f"writes[{i}] では 'value' と 'survey_data' の両方は指定できません。")
+        elif value is not None:
+            # 静的値を使用
+            final_value = value
+        elif survey_data_type is not None:
+            # survey_data から動的に取得
+            try:
+                final_value = get_survey_data_value(survey_data_type, survey_path)
+            except Exception as e:
+                raise RuntimeError(f"writes[{i}] の survey_data '{survey_data_type}' の取得に失敗: {e}")
+        else:
+            raise ValueError(f"writes[{i}] には 'value' か 'survey_data' のいずれかが必要です。")
+
         ws = wb[sheet]
-        ws[addr] = value
+        ws[addr] = final_value
 
     # 出力ディレクトリが存在しない場合に備える
     out.parent.mkdir(parents=True, exist_ok=True)
