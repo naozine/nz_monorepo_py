@@ -509,7 +509,7 @@ region_rows_html = "\n".join([
 class ComponentConfig:
     """コンポーネントの設定"""
     min_segment_width_pct: float = 1.0
-    outside_label_threshold_pct: float = 14.0
+    outside_label_threshold_pct: float = 10.0
     outside_label_with_inner_pct_threshold: float = 5.0
     chart_colors: List[str] = field(default_factory=lambda: [
         "#4c8bf5", "#f58b4c", "#57b26a", "#9166cc", "#e04f5f",
@@ -748,13 +748,9 @@ class HTMLComponents:
                     # 内側セグメント: 回答数（％）を表示
                     segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {fmt_int(c)} ({label_pct}%)\"><span class=\"seg-label\">{fmt_int(c)} ({label_pct}%)</span></div>")
                 else:
-                    # 外側ラベル対象
-                    if label_pct >= self.outside_label_with_inner_pct_threshold:
-                        # 閾値以上: 棒内部に 回答数（％） を表示
-                        segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {fmt_int(c)} ({label_pct}%)\"><span class=\"seg-label\">{fmt_int(c)} ({label_pct}%)</span></div>")
-                    else:
-                        # 閾値未満: 棒内部にラベル非表示（タイトルのみ）
-                        segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {fmt_int(c)} ({label_pct}%)\"></div>")
+                    # 外側ラベル対象（OUTSIDE_LABEL_THRESHOLD_PCT判定）
+                    # 棒内部には一切の数値等を表示しない（タイトルのみ）
+                    segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {fmt_int(c)} ({label_pct}%)\"></div>")
             else:
                 # ラベルを一切表示しない（内外ともに）
                 segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {fmt_int(c)} ({label_pct}%)\"></div>")
