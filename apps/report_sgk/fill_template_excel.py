@@ -85,7 +85,7 @@ def get_survey_data_value(survey_data_type: str, excel_path: Union[str, Path] = 
         raise RuntimeError(f"集計データの取得に失敗しました: {e}")
 
 
-def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "survey.xlsx") -> List[int]:
+def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "survey.xlsx", choice_mapping = None, yaml_choices: list = None) -> List[int]:
     """
     指定のシリーズ種別に応じて、人数配列を返します。
     
@@ -154,8 +154,49 @@ def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "sur
             if qcol not in df.columns:
                 raise RuntimeError(f"指定の設問列が見つかりません: {qcol}")
 
+            # 選択肢マッピング解決関数
+            def resolve_choice_with_mapping(yaml_choice: str, choice_mapping, actual_choices: set, yaml_choices: list = None) -> str:
+                """
+                マッピング優先の選択肢解決
+                choice_mappingは辞書またはリスト形式に対応
+                1. choice_mappingに定義があれば、マッピング先で完全一致検索
+                2. マッピングがなければ従来の部分一致処理
+                """
+                
+                # 1. マッピング定義チェック
+                if choice_mapping:
+                    mapped_choice = None
+                    
+                    # 辞書形式のmapping
+                    if isinstance(choice_mapping, dict) and yaml_choice in choice_mapping:
+                        mapped_choice = choice_mapping[yaml_choice]
+                    
+                    # リスト形式のmapping（yaml_choicesとの順序対応）
+                    elif isinstance(choice_mapping, list) and yaml_choices:
+                        try:
+                            choice_index = yaml_choices.index(yaml_choice)
+                            if choice_index < len(choice_mapping):
+                                mapped_choice = choice_mapping[choice_index]
+                        except ValueError:
+                            pass  # yaml_choice が yaml_choices に見つからない場合
+                    
+                    if mapped_choice:
+                        if mapped_choice in actual_choices:
+                            return mapped_choice
+                        # マッピング先が見つからない場合（通常の動作 - セルごとに1つの値のみ含まれる）
+                
+                # 2. 従来の処理（完全一致 → 部分一致）
+                if yaml_choice in actual_choices:
+                    return yaml_choice
+                
+                for actual_choice in actual_choices:
+                    if yaml_choice in actual_choice:
+                        return actual_choice
+                
+                return None
+
             # 効率的な選択肢カウント関数（パンダスベクトル化）
-            def efficient_choice_counting(df_subset, qcol: str, choice: str, class_col: str, class_order: list) -> List[int]:
+            def efficient_choice_counting(df_subset, qcol: str, choice: str, choice_mapping, class_col: str, class_order: list, yaml_choices: list = None) -> List[int]:
                 """
                 高速なベクトル化処理で選択肢をカウント
                 部分一致にも対応
@@ -170,7 +211,7 @@ def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "sur
                     except:
                         pass
                     
-                    # セル値を選択肢に分解して部分一致チェック
+                    # セル値を選択肢に分解
                     cell_str = str(cell_value).strip()
                     if not cell_str:
                         return False
@@ -179,14 +220,9 @@ def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "sur
                     parts = _re.split(r"[\r\n]+", cell_str)
                     choices_in_cell = [p.strip() for p in parts if p.strip()]
                     
-                    # 完全一致を優先、次に部分一致
-                    for actual_choice in choices_in_cell:
-                        if choice == actual_choice:  # 完全一致
-                            return True
-                        elif choice in actual_choice:  # 部分一致
-                            return True
-                    
-                    return False
+                    # マッピング対応の選択肢解決
+                    matched_choice = resolve_choice_with_mapping(choice, choice_mapping, set(choices_in_cell), yaml_choices)
+                    return matched_choice is not None
                 
                 # より効率的: copyを避けてSeriesで処理
                 choice_mask = df_subset[qcol].apply(contains_choice)
@@ -224,12 +260,12 @@ def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "sur
                 order = ["小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "中3"]
                 if "grade_2024" not in df.columns:
                     raise RuntimeError("必要な列 'grade_2024' が見つかりません。")
-                return efficient_choice_counting(df, qcol, choice, "grade_2024", order)
+                return efficient_choice_counting(df, qcol, choice, choice_mapping, "grade_2024", order, yaml_choices)
             else:
                 order = ["東京23区", "三多摩島しょ", "埼玉県", "神奈川県", "千葉県", "その他"]
                 if "region_bucket" not in df.columns:
                     raise RuntimeError("必要な列 'region_bucket' が見つかりません。")
-                return efficient_choice_counting(df, qcol, choice, "region_bucket", order)
+                return efficient_choice_counting(df, qcol, choice, choice_mapping, "region_bucket", order, yaml_choices)
 
         # 地域シリーズ（region_grades:...）の特別処理
         if series_type.startswith("region_grades"):
@@ -535,7 +571,9 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                 for j, ch_text in enumerate(choices_list):
                     series_str = f"responses:q={q_int};choice={ch_text};class={cls}"
                     try:
-                        values = get_survey_data_series(series_str, survey_path)
+                        # choice_mappingを取得（YAMLから）
+                        yaml_choice_mapping = w.get("choice_mapping", {})
+                        values = get_survey_data_series(series_str, survey_path, yaml_choice_mapping, choices_list)
                     except Exception as e:
                         raise RuntimeError(f"writes[{i}] の responses 取得に失敗（choice='{ch_text}'）: {e}")
                     # 常に縦方向に配置（仕様: 複数 choices は列方向に展開）
@@ -546,7 +584,9 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
             else:
                 # 従来通りの単一シリーズ書き込み
                 try:
-                    values = get_survey_data_series(series_type, survey_path)
+                    # choice_mappingを取得（YAMLから）
+                    yaml_choice_mapping = w.get("choice_mapping", {})
+                    values = get_survey_data_series(series_type, survey_path, yaml_choice_mapping, choices_list)
                 except Exception as e:
                     raise RuntimeError(f"writes[{i}] の survey_series '{series_type}' の取得に失敗: {e}")
 
