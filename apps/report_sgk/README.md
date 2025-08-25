@@ -117,16 +117,18 @@ writes:
     cell: T10
     survey_series: responses
     question: 1          # main.py の設問一覧順（1開始）
-    choice: 知っている   # 指定設問の選択肢文字列
+    choices:
+      - 知っている       # 指定設問の選択肢（複数指定可）
+      - 知らない
     class: grade         # grade | region
-    # direction: down    # 任意（responses は down がデフォルト）
+    # 備考: 複数の choices を指定すると、各選択肢を右隣の列に順に書き込みます（各列は縦方向）。
 ```
 
 - survey_series: responses
-  - 指定の設問(question)における指定の選択肢(choice)の「回答数」を、
+  - 指定の設問(question)における選択肢(choices)の「回答数」を、
     - class: grade の場合は [小1..中3] の順
     - class: region の場合は [東京23区, 三多摩島しょ, 埼玉県, 神奈川県, 千葉県, その他] の順
-    で配列化し、セルから縦方向（デフォルト）に順に書き込みます。
+    で配列化し、セルから縦方向に順に書き込みます。choices を複数指定すると列方向（右）に選択肢ごとに展開します。choices が1つだけの場合は従来と同じ結果です。
 - 設問番号は main.py の `get_question_columns()` が返すリストの 1 始まりの番号です。
 
 既存の series も利用できます:

@@ -341,14 +341,16 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
         # direction: right  # 省略可（未指定なら右）
         # または、region_grades:東京23区 のように survey_series に地域名を含めても可
 
-      # 追加機能: 指定設問の指定選択肢の回答数（学年または地域ごと）を縦方向に書き込み
+      # 追加機能: 指定設問の選択肢の回答数（学年または地域ごと）を縦方向に書き込み
       - sheet: Q1
         cell: T10
         survey_series: responses
         question: 1          # main.py の設問一覧順（1開始）
-        choice: 知っている
+        choices:
+          - 知っている       # 複数指定可／1件のみでも可
+          - 知らない
         class: grade         # grade | region
-        # direction: down    # 省略可（responses は縦方向がデフォルト）
+        # 備考: choices を複数指定すると、各選択肢の列を右方向に展開し、各列は縦方向（down）に書き込みます
 
     :param config_path: YAML ファイルへのパス
     :return: 出力されたファイルの Path
@@ -436,29 +438,40 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                 else:
                     raise ValueError(f"writes[{i}] の region_grades には 'region' キーで地域名を指定してください（例: region: 東京23区）。")
 
-            # responses の補完（question / choice / class を付与）
-            if isinstance(series_type, str) and series_type.strip() == "responses":
+            # responses の補完（question / choices / class を付与）
+            # - choices（リスト）を推奨。choice（単一）は後方互換としてサポート（非推奨）。
+            is_responses = isinstance(series_type, str) and series_type.strip() == "responses"
+            choices_list = None
+            if is_responses:
                 q = w.get("question")
-                ch = w.get("choice")
                 cls = w.get("class")
-                if q is None or ch is None or cls is None:
-                    raise ValueError(f"writes[{i}] の responses には question / choice / class を指定してください。")
+                # 新仕様: 複数選択肢
+                if "choices" in w and w.get("choices") is not None:
+                    cl = w.get("choices")
+                    if not isinstance(cl, list) or not cl:
+                        raise ValueError(f"writes[{i}] の responses: 'choices' は1件以上のリストで指定してください。")
+                    choices_list = [str(x).strip() for x in cl]
+                else:
+                    # 従来の 'choice' を後方互換でサポート（非推奨）
+                    ch = w.get("choice")
+                    if ch is not None:
+                        choices_list = [str(ch).strip()]
+                    else:
+                        raise ValueError(f"writes[{i}] の responses には 'choices'（リスト）を指定してください。旧 'choice' は廃止予定です。")
+                if q is None or cls is None:
+                    raise ValueError(f"writes[{i}] の responses には question / class を指定してください。")
                 try:
                     q_int = int(q)
                 except Exception:
                     raise ValueError(f"writes[{i}] の question は整数で指定してください（指定値: {q}）。")
-                series_type = f"responses:q={q_int};choice={str(ch).strip()};class={str(cls).strip()}"
+                # series_type は choices ごとに後で組み立てる
 
             # 連続セルにシリーズを書き込み
             # 方向のデフォルト: 通常は down、region_grades は right
-            default_direction = "right" if isinstance(series_type, str) and series_type.startswith("region_grades") else "down"
+            default_direction = "right" if isinstance(series_type, str) and isinstance(series_type, str) and series_type.startswith("region_grades") else "down"
             direction = (w.get("direction") or default_direction).lower()
             if direction not in ("down", "right"):
                 raise ValueError(f"writes[{i}] の direction は 'down' または 'right' で指定してください。")
-            try:
-                values = get_survey_data_series(series_type, survey_path)
-            except Exception as e:
-                raise RuntimeError(f"writes[{i}] の survey_series '{series_type}' の取得に失敗: {e}")
 
             # アドレス分解
             col_letters = ''.join([c for c in addr if c.isalpha()])
@@ -468,29 +481,52 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
             base_col = col_letters
             base_row = int(row_digits)
 
-            if direction == "down":
-                for idx, v in enumerate(values):
-                    target = f"{base_col}{base_row + idx}"
-                    write_with_cream(ws, target, v)
-            else:  # right
-                # 右方向も対応（必要なら）。
-                # 列文字を番号に変換してインクリメント
-                def col_to_num(s: str) -> int:
-                    num = 0
-                    for ch in s:
-                        num = num * 26 + (ord(ch.upper()) - ord('A') + 1)
-                    return num
-                def num_to_col(n: int) -> str:
-                    res = ""
-                    while n > 0:
-                        n, rem = divmod(n - 1, 26)
-                        res = chr(ord('A') + rem) + res
-                    return res
-                base_col_num = col_to_num(base_col)
-                for idx, v in enumerate(values):
-                    col_letter = num_to_col(base_col_num + idx)
-                    target = f"{col_letter}{base_row}"
-                    write_with_cream(ws, target, v)
+            # 列文字<->番号の相互変換
+            def col_to_num(s: str) -> int:
+                num = 0
+                for ch in s:
+                    num = num * 26 + (ord(ch.upper()) - ord('A') + 1)
+                return num
+            def num_to_col(n: int) -> str:
+                res = ""
+                while n > 0:
+                    n, rem = divmod(n - 1, 26)
+                    res = chr(ord('A') + rem) + res
+                return res
+            base_col_num = col_to_num(base_col)
+
+            if is_responses and choices_list is not None:
+                # 新仕様: 複数 choices に対応
+                # - 各 choice のシリーズは「縦方向（down）」に書き込み
+                # - choice ごとに開始列を1つずつ右にずらす
+                cls = str(w.get("class")).strip()
+                for j, ch_text in enumerate(choices_list):
+                    series_str = f"responses:q={q_int};choice={ch_text};class={cls}"
+                    try:
+                        values = get_survey_data_series(series_str, survey_path)
+                    except Exception as e:
+                        raise RuntimeError(f"writes[{i}] の responses 取得に失敗（choice='{ch_text}'）: {e}")
+                    # 常に縦方向に配置（仕様: 複数 choices は列方向に展開）
+                    col_letter = num_to_col(base_col_num + j)
+                    for idx, v in enumerate(values):
+                        target = f"{col_letter}{base_row + idx}"
+                        write_with_cream(ws, target, v)
+            else:
+                # 従来通りの単一シリーズ書き込み
+                try:
+                    values = get_survey_data_series(series_type, survey_path)
+                except Exception as e:
+                    raise RuntimeError(f"writes[{i}] の survey_series '{series_type}' の取得に失敗: {e}")
+
+                if direction == "down":
+                    for idx, v in enumerate(values):
+                        target = f"{base_col}{base_row + idx}"
+                        write_with_cream(ws, target, v)
+                else:  # right
+                    for idx, v in enumerate(values):
+                        col_letter = num_to_col(base_col_num + idx)
+                        target = f"{col_letter}{base_row}"
+                        write_with_cream(ws, target, v)
         else:
             # 単一セル書き込み
             if value is not None:
