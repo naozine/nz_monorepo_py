@@ -509,7 +509,7 @@ region_rows_html = "\n".join([
 class ComponentConfig:
     """コンポーネントの設定"""
     min_segment_width_pct: float = 1.0
-    outside_label_threshold_pct: float = 24.0
+    outside_label_threshold_pct: float = 14.0
     outside_label_with_inner_pct_threshold: float = 5.0
     chart_colors: List[str] = field(default_factory=lambda: [
         "#4c8bf5", "#f58b4c", "#57b26a", "#9166cc", "#e04f5f",
@@ -689,7 +689,7 @@ class HTMLComponents:
             if not show_labels or not outside_labels:
                 return "", ""
             
-            # 各外側ラベルの基本情報を集める
+            # 1) 各外側ラベルの基本情報（中心位置と表示テキスト）を集める
             label_data = []
             for o in outside_labels:
                 # セグメント中央位置を計算
@@ -699,70 +699,32 @@ class HTMLComponents:
                         break
                     if prev_o in adjusted_widths:
                         left_pos += adjusted_widths[prev_o]
-                
                 center_pos = left_pos + (adjusted_widths.get(o, 0) / 2)
-                label_pct = round((counts.get(o, 0) / S) * 100.0, 1)
                 
-                # 外側ラベルの表示内容を判定
-                if label_pct >= self.outside_label_with_inner_pct_threshold:
-                    # 5%以上: 外側は選択肢名のみ、内側に割合表示
-                    label_text = f"{self.escape_html(o)}"
-                else:
-                    # 5%未満: 外側に選択肢名+割合表示
-                    label_text = f"{self.escape_html(o)} {label_pct}%"
+                # 表示テキストは常に「回答数（％）」にする
+                c = counts.get(o, 0)
+                label_pct = round((c / S) * 100.0, 1)
+                label_text = f"{fmt_int(c)} ({label_pct}%)"
                 
                 label_data.append((center_pos, label_text, o))
             
-            # Flexbox風配置で位置調整
+            # 2) 横方向の重なり回避（位置調整）
             adjusted_label_data = calculate_flexbox_positions(label_data, 100.0)
             
-            # 調整後の配置で層分けを実行
-            # 可能な限り同じ高さ（layer1）に配置し、重なりがある場合のみ分散
-            from collections import defaultdict
-            top_layers = defaultdict(list)
-            bottom_layers = defaultdict(list)
-            
-            # まずは全て上layer1に配置を試行
-            for i, (pos, text, option) in enumerate(adjusted_label_data):
-                if i < len(adjusted_label_data) // 2:  # 前半は上側
-                    top_layers[1].append((pos, text, option))
-                else:  # 後半は下側
-                    bottom_layers[1].append((pos, text, option))
-            
-            # HTML生成：動的に層を構築
-            def render_label_layer(labels, layer_num, has_leader_line=False, line_direction=""):
+            # 3) すべて下側に、同じ縦位置（単一レイヤー）で表示
+            def render_single_bottom_layer(labels):
                 if not labels:
                     return ""
-                layer_class = f"label-layer-{layer_num}"
-                layer_html = f'<div class="{layer_class}">'
+                layer_html = '<div class="label-layer-1">'
                 for pos, text, option in labels:
                     label_style = f"left:{pos:.2f}%; transform:translateX(-50%);"
                     layer_html += f'<div class="outside-label" style="{label_style}">{text}</div>'
-                    if has_leader_line:
-                        line_style = f"left:{pos:.2f}%; height:100%;"
-                        layer_html += f'<div class="leader-line {line_direction}" style="{line_style}"></div>'
                 layer_html += '</div>'
                 return layer_html
             
-            # 上側の層を逆順で配置（遠い層から先に配置）
-            top_html = ""
-            max_top_layer = max(top_layers.keys()) if top_layers else 0
-            for layer_num in range(max_top_layer, 0, -1):  # 大きい層番号から小さい層番号へ
-                if layer_num in top_layers:
-                    has_leader = (layer_num > 1)  # layer1のみリード線なし
-                    top_html += render_label_layer(top_layers[layer_num], layer_num, has_leader, "to-bottom")
-            
-            # 下側の層を正順で配置（近い層から先に配置）
-            bottom_html = ""
-            max_bottom_layer = max(bottom_layers.keys()) if bottom_layers else 0
-            for layer_num in range(1, max_bottom_layer + 1):  # 小さい層番号から大きい層番号へ
-                if layer_num in bottom_layers:
-                    has_leader = (layer_num > 1)  # layer1のみリード線なし
-                    bottom_html += render_label_layer(bottom_layers[layer_num], layer_num, has_leader, "to-top")
-            
-            top_container = f'<div class="outside-labels-top">{top_html}</div>' if top_html else ""
+            bottom_html = render_single_bottom_layer(adjusted_label_data)
+            top_container = ""  # 上側ラベルは表示しない
             bottom_container = f'<div class="outside-labels-bottom">{bottom_html}</div>' if bottom_html else ""
-            
             return top_container, bottom_container
         
         top_labels_html, bottom_labels_html = calculate_outside_labels_html()
@@ -783,19 +745,19 @@ class HTMLComponents:
             if show_labels:
                 # 内側ラベル表示判定
                 if o in inside_segments:
-                    # 内側セグメント: 選択肢名+割合表示（従来通り）
-                    segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {label_pct}%\"><span class=\"seg-label\">{self.escape_html(o)} {label_pct}%</span></div>")
+                    # 内側セグメント: 回答数（％）を表示
+                    segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {fmt_int(c)} ({label_pct}%)\"><span class=\"seg-label\">{fmt_int(c)} ({label_pct}%)</span></div>")
                 else:
                     # 外側ラベル対象
                     if label_pct >= self.outside_label_with_inner_pct_threshold:
-                        # 10%以上: 棒内部に割合のみ表示
-                        segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {label_pct}%\"><span class=\"seg-label\">{label_pct}%</span></div>")
+                        # 閾値以上: 棒内部に 回答数（％） を表示
+                        segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {fmt_int(c)} ({label_pct}%)\"><span class=\"seg-label\">{fmt_int(c)} ({label_pct}%)</span></div>")
                     else:
-                        # 10%未満: 棒内部にラベル非表示
-                        segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {label_pct}%\"></div>")
+                        # 閾値未満: 棒内部にラベル非表示（タイトルのみ）
+                        segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {fmt_int(c)} ({label_pct}%)\"></div>")
             else:
                 # ラベルを一切表示しない（内外ともに）
-                segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {label_pct}%\"></div>")
+                segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {fmt_int(c)} ({label_pct}%)\"></div>")
             
             left += w
         
@@ -836,7 +798,7 @@ class HTMLComponents:
             counts, S = aggregate_group(fr, qcol, order)
             if S == 0:
                 continue
-            bar_html = self.render_stacked_bar(name, counts, order, colors, unit, show_total_right=False, show_labels=False)
+            bar_html = self.render_stacked_bar(name, counts, order, colors, unit, show_total_right=False, show_labels=True)
             label_text = f"{self.escape_html(name)} = {S:,}{suffix}"
             inner.append(f"<div><div class=\"muted\" style=\"margin-bottom:0.3mm;\">{label_text}</div>{bar_html}</div>")
         legend_html = self.render_legend(order, colors)
@@ -1014,7 +976,7 @@ class QuestionComponent(HTMLComponents):
         if S_overall > 0:
             overall_suffix = "回" if unit.endswith("回中") else "人"
             overall_label = f"全体 = {S_overall:,}{overall_suffix}"
-            overall_bar_html = f"<div><div class=\"muted\" style=\"margin-bottom:0.3mm;\">{overall_label}</div>{self.render_stacked_bar('全体', overall_counts, order, colors, unit, show_total_right=False, show_labels=False)}</div>"
+            overall_bar_html = f"<div><div class=\"muted\" style=\"margin-bottom:0.3mm;\">{overall_label}</div>{self.render_stacked_bar('全体', overall_counts, order, colors, unit, show_total_right=False, show_labels=True)}</div>"
         else:
             overall_bar_html = "<div><div class=\"muted\">データなし</div></div>"
         
