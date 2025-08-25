@@ -95,7 +95,7 @@ def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "sur
       - "junior_boys": 中1〜中3の男子の回答者数（3個）
       - "junior_girls": 中1〜中3の女子の回答者数（3個）
       - "region_grades:<地域名>": 指定地域の小1〜中3の回答者数（9個）
-        例: "region_grades:東京23区" / "region_grades:東京都下" / "region_grades:埼玉県" など
+        例: "region_grades:東京23区" / "region_grades:三多摩島しょ" / "region_grades:埼玉県" など
     
     :return: 各学年の人数リスト（順序は学年の昇順）
     """
@@ -129,7 +129,7 @@ def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "sur
             reg = normalize_region(region_name)
             allowed = {"東京23区", "三多摩島しょ", "埼玉県", "神奈川県", "千葉県", "その他"}
             if reg not in allowed:
-                raise ValueError(f"不明な地域名: {region_name}（許可: 東京23区, 東京都下, 埼玉県, 神奈川県, 千葉県, その他）")
+                raise ValueError(f"不明な地域名: {region_name}（許可: 東京23区, 三多摩島しょ, 埼玉県, 神奈川県, 千葉県, その他）")
 
             # 必要な列確認
             for col in ["region_bucket", "grade_2024"]:
@@ -253,7 +253,7 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
       - sheet: p1
         cell: E25
         survey_series: region_grades
-        region: 東京23区  # 許可: 東京23区 / 東京都下 / 埼玉県 / 神奈川県 / 千葉県 / その他
+        region: 東京23区  # 許可: 東京23区 / 三多摩島しょ / 埼玉県 / 神奈川県 / 千葉県 / その他
         # direction: right  # 省略可（未指定なら右）
         # または、region_grades:東京23区 のように survey_series に地域名を含めても可
 
