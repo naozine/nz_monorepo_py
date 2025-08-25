@@ -42,15 +42,8 @@ def fill_ac14(template_path: Union[str, Path], output_path: Union[str, Path], va
         raise KeyError("テンプレートにシート 'p1' が見つかりません")
 
     ws = wb["p1"]
-    # 変更検出して変更されたらクリーム色に
-    old = ws["AC14"].value
-    ws["AC14"] = value
-    if old != value:
-        try:
-            cream_fill = PatternFill(fill_type="solid", start_color="FFF2CC", end_color="FFF2CC")
-            ws["AC14"].fill = cream_fill
-        except Exception:
-            pass
+    # 値を書き込み、変更有無に応じて背景色を付与（変更: クリーム／未変更: 薄い水色）
+    write_with_cream(ws, "AC14", value)
 
     out = Path(output_path)
     # 出力ディレクトリが存在しない場合に備える
@@ -160,12 +153,17 @@ def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "sur
         raise RuntimeError(f"シリーズ集計の取得に失敗しました: {e}")
 
 
-# クリーム色の塗りつぶし（変更時に適用）
+# クリーム色（変更時）と薄い水色（未変更時）の塗りつぶし
 CREAM_FILL = PatternFill(fill_type="solid", start_color="FFF2CC", end_color="FFF2CC")
+BLUE_FILL = PatternFill(fill_type="solid", start_color="DDEBF7", end_color="DDEBF7")
 
 
 def write_with_cream(ws, addr: str, new_value: Any):
-    """セルの値を設定し、値が変わった場合にクリーム色の背景を付与する。"""
+    """セルの値を設定し、
+    - 値が変わった場合: クリーム色（FFF2CC）
+    - 値が変わらない場合: 薄い水色（DDEBF7）
+    の背景を付与する。
+    """
     try:
         old_value = ws[addr].value
     except Exception:
@@ -174,6 +172,8 @@ def write_with_cream(ws, addr: str, new_value: Any):
     try:
         if old_value != new_value:
             ws[addr].fill = CREAM_FILL
+        else:
+            ws[addr].fill = BLUE_FILL
     except Exception:
         # スタイル設定に失敗しても処理を継続
         pass
