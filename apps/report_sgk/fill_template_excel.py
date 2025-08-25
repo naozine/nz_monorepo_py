@@ -83,6 +83,74 @@ def get_survey_data_value(survey_data_type: str, excel_path: Union[str, Path] = 
         raise RuntimeError(f"集計データの取得に失敗しました: {e}")
 
 
+def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "survey.xlsx") -> List[int]:
+    """
+    指定のシリーズ種別に応じて、学年別×性別の人数配列を返します。
+    
+    サポートする series_type:
+      - "elementary_boys": 小1〜小6の男子の回答者数（6個）
+      - "elementary_girls": 小1〜小6の女子の回答者数（6個）
+      - "junior_boys": 中1〜中3の男子の回答者数（3個）
+      - "junior_girls": 中1〜中3の女子の回答者数（3個）
+    
+    :return: 各学年の人数リスト（順序は学年の昇順）
+    """
+    if ReportDataPreparator is None:
+        raise RuntimeError("main.py からのインポートが失敗しているため、survey_series 機能は利用できません。")
+
+    try:
+        config = ReportConfig()
+        preparator = ReportDataPreparator(config)
+        processed_data: ProcessedData = preparator.prepare_data(Path(excel_path))
+        df = processed_data.df_effective
+
+        # 定義（日本語ラベルに依存）
+        series_def = {
+            "elementary_boys": {
+                "level": "小学校",
+                "gender": "男性",
+                "grades": ["小1", "小2", "小3", "小4", "小5", "小6"],
+            },
+            "elementary_girls": {
+                "level": "小学校",
+                "gender": "女性",
+                "grades": ["小1", "小2", "小3", "小4", "小5", "小6"],
+            },
+            "junior_boys": {
+                "level": "中学校",
+                "gender": "男性",
+                "grades": ["中1", "中2", "中3"],
+            },
+            "junior_girls": {
+                "level": "中学校",
+                "gender": "女性",
+                "grades": ["中1", "中2", "中3"],
+            },
+        }
+
+        if series_type not in series_def:
+            raise ValueError(f"不明な survey_series: {series_type}")
+
+        defn = series_def[series_type]
+        level = defn["level"]
+        gender = defn["gender"]
+        grades = defn["grades"]
+
+        # フィルタ列の存在確認
+        for col in ["school_level", "gender_norm", "grade_2024"]:
+            if col not in df.columns:
+                raise RuntimeError(f"必要な列 '{col}' が見つかりません。Excelや前処理の仕様をご確認ください。")
+
+        mask_level_gender = (df["school_level"] == level) & (df["gender_norm"] == gender)
+        counts: List[int] = []
+        for g in grades:
+            counts.append(int(((df["grade_2024"] == g) & mask_level_gender).sum()))
+        return counts
+
+    except Exception as e:
+        raise RuntimeError(f"シリーズ集計の取得に失敗しました: {e}")
+
+
 def fill_from_yaml(config_path: Union[str, Path]) -> Path:
     """
     YAML 設定を読み込み、指定のシート/セルへ値を書き込みます。
@@ -109,6 +177,12 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
       - sheet: p1
         cell: B12
         survey_data: effective_responses  # 有効回答者数
+
+      # 新機能: 連続セルに学年別の人数を書き込み（デフォルトは下方向）
+      - sheet: p1
+        cell: D20      # このセルに小1男子、その下に小2男子…小6男子まで
+        survey_series: elementary_boys   # elementary_boys | elementary_girls | junior_boys | junior_girls
+        # direction: down  # 省略可（right も指定可能）
 
     :param config_path: YAML ファイルへのパス
     :return: 出力されたファイルの Path
@@ -175,26 +249,69 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                     raise ValueError(f"writes[{i}] の column が不正です。")
             addr = f"{col_letter}{int(row)}"
 
-        # 値の取得: value または survey_data のいずれか
+        # シリーズ書き込みか単一値かを判定
+        series_type = w.get("survey_series")
         value = w.get("value")
         survey_data_type = w.get("survey_data")
-        
-        if value is not None and survey_data_type is not None:
-            raise ValueError(f"writes[{i}] では 'value' と 'survey_data' の両方は指定できません。")
-        elif value is not None:
-            # 静的値を使用
-            final_value = value
-        elif survey_data_type is not None:
-            # survey_data から動的に取得
-            try:
-                final_value = get_survey_data_value(survey_data_type, survey_path)
-            except Exception as e:
-                raise RuntimeError(f"writes[{i}] の survey_data '{survey_data_type}' の取得に失敗: {e}")
-        else:
-            raise ValueError(f"writes[{i}] には 'value' か 'survey_data' のいずれかが必要です。")
+
+        # 相互排他
+        specified = [x is not None for x in (value, survey_data_type, series_type)]
+        if sum(specified) != 1:
+            raise ValueError(f"writes[{i}] では 'value' / 'survey_data' / 'survey_series' のいずれか1つだけを指定してください。")
 
         ws = wb[sheet]
-        ws[addr] = final_value
+
+        if series_type is not None:
+            # 連続セル（デフォルト: 縦）にシリーズを書き込み
+            direction = (w.get("direction") or "down").lower()
+            if direction not in ("down", "right"):
+                raise ValueError(f"writes[{i}] の direction は 'down' または 'right' で指定してください。")
+            try:
+                values = get_survey_data_series(series_type, survey_path)
+            except Exception as e:
+                raise RuntimeError(f"writes[{i}] の survey_series '{series_type}' の取得に失敗: {e}")
+
+            # アドレス分解
+            col_letters = ''.join([c for c in addr if c.isalpha()])
+            row_digits = ''.join([c for c in addr if c.isdigit()])
+            if not col_letters or not row_digits:
+                raise ValueError(f"writes[{i}] の cell アドレスが不正です: {addr}")
+            base_col = col_letters
+            base_row = int(row_digits)
+
+            if direction == "down":
+                for idx, v in enumerate(values):
+                    target = f"{base_col}{base_row + idx}"
+                    ws[target] = v
+            else:  # right
+                # 右方向も対応（必要なら）。
+                # 列文字を番号に変換してインクリメント
+                def col_to_num(s: str) -> int:
+                    num = 0
+                    for ch in s:
+                        num = num * 26 + (ord(ch.upper()) - ord('A') + 1)
+                    return num
+                def num_to_col(n: int) -> str:
+                    res = ""
+                    while n > 0:
+                        n, rem = divmod(n - 1, 26)
+                        res = chr(ord('A') + rem) + res
+                    return res
+                base_col_num = col_to_num(base_col)
+                for idx, v in enumerate(values):
+                    col_letter = num_to_col(base_col_num + idx)
+                    target = f"{col_letter}{base_row}"
+                    ws[target] = v
+        else:
+            # 単一セル書き込み
+            if value is not None:
+                final_value = value
+            else:
+                try:
+                    final_value = get_survey_data_value(survey_data_type, survey_path)
+                except Exception as e:
+                    raise RuntimeError(f"writes[{i}] の survey_data '{survey_data_type}' の取得に失敗: {e}")
+            ws[addr] = final_value
 
     # 出力ディレクトリが存在しない場合に備える
     out.parent.mkdir(parents=True, exist_ok=True)
