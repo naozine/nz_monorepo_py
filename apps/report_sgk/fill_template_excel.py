@@ -6,6 +6,7 @@ try:
     # openpyxl is the de-facto library for .xlsx read/write
     from openpyxl import load_workbook
     from openpyxl.utils import get_column_letter
+    from openpyxl.styles import PatternFill
 except Exception as e:  # pragma: no cover
     raise RuntimeError("openpyxl が必要です。`pip install openpyxl` を実行してください。") from e
 
@@ -41,7 +42,15 @@ def fill_ac14(template_path: Union[str, Path], output_path: Union[str, Path], va
         raise KeyError("テンプレートにシート 'p1' が見つかりません")
 
     ws = wb["p1"]
+    # 変更検出して変更されたらクリーム色に
+    old = ws["AC14"].value
     ws["AC14"] = value
+    if old != value:
+        try:
+            cream_fill = PatternFill(fill_type="solid", start_color="FFF2CC", end_color="FFF2CC")
+            ws["AC14"].fill = cream_fill
+        except Exception:
+            pass
 
     out = Path(output_path)
     # 出力ディレクトリが存在しない場合に備える
@@ -149,6 +158,25 @@ def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "sur
 
     except Exception as e:
         raise RuntimeError(f"シリーズ集計の取得に失敗しました: {e}")
+
+
+# クリーム色の塗りつぶし（変更時に適用）
+CREAM_FILL = PatternFill(fill_type="solid", start_color="FFF2CC", end_color="FFF2CC")
+
+
+def write_with_cream(ws, addr: str, new_value: Any):
+    """セルの値を設定し、値が変わった場合にクリーム色の背景を付与する。"""
+    try:
+        old_value = ws[addr].value
+    except Exception:
+        old_value = None
+    ws[addr] = new_value
+    try:
+        if old_value != new_value:
+            ws[addr].fill = CREAM_FILL
+    except Exception:
+        # スタイル設定に失敗しても処理を継続
+        pass
 
 
 def fill_from_yaml(config_path: Union[str, Path]) -> Path:
@@ -282,7 +310,7 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
             if direction == "down":
                 for idx, v in enumerate(values):
                     target = f"{base_col}{base_row + idx}"
-                    ws[target] = v
+                    write_with_cream(ws, target, v)
             else:  # right
                 # 右方向も対応（必要なら）。
                 # 列文字を番号に変換してインクリメント
@@ -301,7 +329,7 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                 for idx, v in enumerate(values):
                     col_letter = num_to_col(base_col_num + idx)
                     target = f"{col_letter}{base_row}"
-                    ws[target] = v
+                    write_with_cream(ws, target, v)
         else:
             # 単一セル書き込み
             if value is not None:
@@ -311,7 +339,7 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                     final_value = get_survey_data_value(survey_data_type, survey_path)
                 except Exception as e:
                     raise RuntimeError(f"writes[{i}] の survey_data '{survey_data_type}' の取得に失敗: {e}")
-            ws[addr] = final_value
+            write_with_cream(ws, addr, final_value)
 
     # 出力ディレクトリが存在しない場合に備える
     out.parent.mkdir(parents=True, exist_ok=True)
