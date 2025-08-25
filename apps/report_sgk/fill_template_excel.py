@@ -53,7 +53,7 @@ def fill_ac14(template_path: Union[str, Path], output_path: Union[str, Path], va
     return out
 
 
-def get_survey_data_value(survey_data_type: str, excel_path: Union[str, Path] = "survey.xlsx") -> Any:
+def get_survey_data_value(survey_data_type: str, processed_data: 'ProcessedData' = None, excel_path: Union[str, Path] = "survey.xlsx") -> Any:
     """
     survey_data_type に応じて、main.py の集計データから値を取得します。
     
@@ -61,16 +61,19 @@ def get_survey_data_value(survey_data_type: str, excel_path: Union[str, Path] = 
         - "total_responses": 総回答者数
         - "invalid_responses": 無効回答者数（未就学児等）
         - "effective_responses": 有効回答者数
-    :param excel_path: アンケートExcelファイルのパス
+    :param processed_data: 事前に処理済みのデータ（パフォーマンス最適化用）
+    :param excel_path: アンケートExcelファイルのパス（processed_data未指定時のみ使用）
     :return: 対応する値
     """
     if ReportDataPreparator is None:
         raise RuntimeError("main.py からのインポートが失敗しているため、survey_data 機能は利用できません。")
     
     try:
-        config = ReportConfig()
-        preparator = ReportDataPreparator(config)
-        processed_data: ProcessedData = preparator.prepare_data(Path(excel_path))
+        # 事前処理済みデータが提供されていない場合のみ新規作成
+        if processed_data is None:
+            config = ReportConfig()
+            preparator = ReportDataPreparator(config)
+            processed_data = preparator.prepare_data(Path(excel_path))
         
         if survey_data_type == "total_responses":
             return processed_data.n_total + processed_data.n_preschool
@@ -85,7 +88,7 @@ def get_survey_data_value(survey_data_type: str, excel_path: Union[str, Path] = 
         raise RuntimeError(f"集計データの取得に失敗しました: {e}")
 
 
-def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "survey.xlsx", choice_mapping = None, yaml_choices: list = None) -> List[int]:
+def get_survey_data_series(series_type: str, processed_data: 'ProcessedData' = None, excel_path: Union[str, Path] = "survey.xlsx", choice_mapping = None, yaml_choices: list = None) -> List[int]:
     """
     指定のシリーズ種別に応じて、人数配列を返します。
     
@@ -99,15 +102,19 @@ def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "sur
       - "responses:q=<番号>;choice=<選択肢>;class=<grade|region>": 指定設問の特定選択肢の回答数を、学年または地域の順で返す
         例: "responses:q=1;choice=知っている;class=grade"
     
+    :param processed_data: 事前に処理済みのデータ（パフォーマンス最適化用）
+    :param excel_path: アンケートExcelファイルのパス（processed_data未指定時のみ使用）
     :return: 人数リスト（series_typeに応じた順序）
     """
     if ReportDataPreparator is None:
         raise RuntimeError("main.py からのインポートが失敗しているため、survey_series 機能は利用できません。")
 
     try:
-        config = ReportConfig()
-        preparator = ReportDataPreparator(config)
-        processed_data: ProcessedData = preparator.prepare_data(Path(excel_path))
+        # 事前処理済みデータが提供されていない場合のみ新規作成
+        if processed_data is None:
+            config = ReportConfig()
+            preparator = ReportDataPreparator(config)
+            processed_data = preparator.prepare_data(Path(excel_path))
         df = processed_data.df_effective
 
         # 地域名の正規化関数
@@ -458,6 +465,21 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
     if not tpath.exists():
         raise FileNotFoundError(f"テンプレートが見つかりません: {tpath}")
 
+    # パフォーマンス最適化: データ処理を最初に1回だけ実行
+    processed_data = None
+    needs_survey_data = any(
+        w.get("survey_data") is not None or w.get("survey_series") is not None
+        for w in writes
+    )
+    if needs_survey_data and ReportDataPreparator is not None:
+        try:
+            config = ReportConfig()
+            preparator = ReportDataPreparator(config)
+            processed_data = preparator.prepare_data(survey_path)
+        except Exception as e:
+            print(f"警告: survey データの事前読み込みに失敗しました: {e}")
+            processed_data = None
+
     wb = load_workbook(tpath)
 
     for i, w in enumerate(writes, start=1):
@@ -573,7 +595,7 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                     try:
                         # choice_mappingを取得（YAMLから）
                         yaml_choice_mapping = w.get("choice_mapping", {})
-                        values = get_survey_data_series(series_str, survey_path, yaml_choice_mapping, choices_list)
+                        values = get_survey_data_series(series_str, processed_data, survey_path, yaml_choice_mapping, choices_list)
                     except Exception as e:
                         raise RuntimeError(f"writes[{i}] の responses 取得に失敗（choice='{ch_text}'）: {e}")
                     # 常に縦方向に配置（仕様: 複数 choices は列方向に展開）
@@ -586,7 +608,7 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                 try:
                     # choice_mappingを取得（YAMLから）
                     yaml_choice_mapping = w.get("choice_mapping", {})
-                    values = get_survey_data_series(series_type, survey_path, yaml_choice_mapping, choices_list)
+                    values = get_survey_data_series(series_type, processed_data, survey_path, yaml_choice_mapping, choices_list)
                 except Exception as e:
                     raise RuntimeError(f"writes[{i}] の survey_series '{series_type}' の取得に失敗: {e}")
 
@@ -605,7 +627,7 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                 final_value = value
             else:
                 try:
-                    final_value = get_survey_data_value(survey_data_type, survey_path)
+                    final_value = get_survey_data_value(survey_data_type, processed_data, survey_path)
                 except Exception as e:
                     raise RuntimeError(f"writes[{i}] の survey_data '{survey_data_type}' の取得に失敗: {e}")
             write_with_cream(ws, addr, final_value)
