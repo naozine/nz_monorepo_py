@@ -87,13 +87,15 @@ def get_survey_data_value(survey_data_type: str, excel_path: Union[str, Path] = 
 
 def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "survey.xlsx") -> List[int]:
     """
-    指定のシリーズ種別に応じて、学年別×性別の人数配列を返します。
+    指定のシリーズ種別に応じて、学年別の人数配列を返します。
     
     サポートする series_type:
       - "elementary_boys": 小1〜小6の男子の回答者数（6個）
       - "elementary_girls": 小1〜小6の女子の回答者数（6個）
       - "junior_boys": 中1〜中3の男子の回答者数（3個）
       - "junior_girls": 中1〜中3の女子の回答者数（3個）
+      - "region_grades:<地域名>": 指定地域の小1〜中3の回答者数（9個）
+        例: "region_grades:東京23区" / "region_grades:東京都下" / "region_grades:埼玉県" など
     
     :return: 各学年の人数リスト（順序は学年の昇順）
     """
@@ -106,7 +108,42 @@ def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "sur
         processed_data: ProcessedData = preparator.prepare_data(Path(excel_path))
         df = processed_data.df_effective
 
-        # 定義（日本語ラベルに依存）
+        # 地域名の正規化関数
+        def normalize_region(name: str) -> str:
+            nm = str(name).strip()
+            if nm == "東京都下":
+                return "三多摩島しょ"
+            return nm
+
+        # 地域シリーズ（region_grades:...）の特別処理
+        if series_type.startswith("region_grades"):
+            # 記法1: "region_grades:地域名"
+            region_name = None
+            parts = series_type.split(":", 1)
+            if len(parts) == 2 and parts[1].strip():
+                region_name = parts[1].strip()
+            # 記法2: YAML 側で region キーを使う場合は fill_from_yaml 側で地域名を補完して再呼び出しする想定
+            # ここでは parts に地域名があればそれを使う
+            if not region_name:
+                raise ValueError("region_grades の地域名が指定されていません。'region_grades:東京23区' のように指定してください。")
+            reg = normalize_region(region_name)
+            allowed = {"東京23区", "三多摩島しょ", "埼玉県", "神奈川県", "千葉県", "その他"}
+            if reg not in allowed:
+                raise ValueError(f"不明な地域名: {region_name}（許可: 東京23区, 東京都下, 埼玉県, 神奈川県, 千葉県, その他）")
+
+            # 必要な列確認
+            for col in ["region_bucket", "grade_2024"]:
+                if col not in df.columns:
+                    raise RuntimeError(f"必要な列 '{col}' が見つかりません。Excelや前処理の仕様をご確認ください。")
+
+            grades = ["小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "中3"]
+            counts: List[int] = []
+            mask_reg = (df["region_bucket"] == reg)
+            for g in grades:
+                counts.append(int(((df["grade_2024"] == g) & mask_reg).sum()))
+            return counts
+
+        # 既存：性別×学年シリーズ
         series_def = {
             "elementary_boys": {
                 "level": "小学校",
@@ -212,6 +249,14 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
         survey_series: elementary_boys   # elementary_boys | elementary_girls | junior_boys | junior_girls
         # direction: down  # 省略可（right も指定可能）
 
+      # 新機能: 地域別（小1〜中3）を横方向に書き込み（デフォルトは右方向）
+      - sheet: p1
+        cell: E25
+        survey_series: region_grades
+        region: 東京23区  # 許可: 東京23区 / 東京都下 / 埼玉県 / 神奈川県 / 千葉県 / その他
+        # direction: right  # 省略可（未指定なら右）
+        # または、region_grades:東京23区 のように survey_series に地域名を含めても可
+
     :param config_path: YAML ファイルへのパス
     :return: 出力されたファイルの Path
     """
@@ -290,8 +335,18 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
         ws = wb[sheet]
 
         if series_type is not None:
-            # 連続セル（デフォルト: 縦）にシリーズを書き込み
-            direction = (w.get("direction") or "down").lower()
+            # region_grades の地域名を補完（survey_series が文字列 'region_grades' かつ region キーが与えられている場合）
+            region_param = w.get("region")
+            if isinstance(series_type, str) and series_type.strip() == "region_grades":
+                if region_param:
+                    series_type = f"region_grades:{str(region_param).strip()}"
+                else:
+                    raise ValueError(f"writes[{i}] の region_grades には 'region' キーで地域名を指定してください（例: region: 東京23区）。")
+
+            # 連続セルにシリーズを書き込み
+            # 方向のデフォルト: 通常は down、region_grades は right
+            default_direction = "right" if isinstance(series_type, str) and series_type.startswith("region_grades") else "down"
+            direction = (w.get("direction") or default_direction).lower()
             if direction not in ("down", "right"):
                 raise ValueError(f"writes[{i}] の direction は 'down' または 'right' で指定してください。")
             try:
