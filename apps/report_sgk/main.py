@@ -637,7 +637,7 @@ class HTMLComponents:
         
         return f"{self.escape_html(part1)}<br>{self.escape_html(part2)}"
 
-    def render_stacked_bar(self, title: str, counts: dict, order: list[str], colors: dict, unit: str, show_total_right: bool = True) -> str:
+    def render_stacked_bar(self, title: str, counts: dict, order: list[str], colors: dict, unit: str, show_total_right: bool = True, show_labels: bool = True) -> str:
         """1本の積み上げ棒HTMLを生成"""
         S = sum(counts.values())
         if S == 0:
@@ -650,7 +650,7 @@ class HTMLComponents:
             if c > 0:
                 actual_widths[o] = (c / S) * 100.0
         
-        # 2. 外側ラベル対象を判定
+        # 2. 外側ラベル対象を判定（ラベル非表示時は空）
         outside_labels = []
         inside_segments = []
         
@@ -658,7 +658,7 @@ class HTMLComponents:
             if o not in actual_widths:
                 continue
             actual_w = actual_widths[o]
-            if actual_w < self.outside_label_threshold_pct:
+            if show_labels and (actual_w < self.outside_label_threshold_pct):
                 outside_labels.append(o)
             else:
                 inside_segments.append(o)
@@ -686,7 +686,7 @@ class HTMLComponents:
         
         # 5. 外側ラベル配置の計算（新しいFlexbox風アルゴリズム）
         def calculate_outside_labels_html():
-            if not outside_labels:
+            if not show_labels or not outside_labels:
                 return "", ""
             
             # 各外側ラベルの基本情報を集める
@@ -780,25 +780,29 @@ class HTMLComponents:
             
             style = f"left:{left:.6f}%;width:{w:.6f}%;background:{colors.get(o,'#999')};"
             
-            # 内側ラベル表示判定
-            if o in inside_segments:
-                # 内側セグメント: 選択肢名+割合表示（従来通り）
-                segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {label_pct}%\"><span class=\"seg-label\">{self.escape_html(o)} {label_pct}%</span></div>")
-            else:
-                # 外側ラベル対象
-                if label_pct >= self.outside_label_with_inner_pct_threshold:
-                    # 10%以上: 棒内部に割合のみ表示
-                    segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {label_pct}%\"><span class=\"seg-label\">{label_pct}%</span></div>")
+            if show_labels:
+                # 内側ラベル表示判定
+                if o in inside_segments:
+                    # 内側セグメント: 選択肢名+割合表示（従来通り）
+                    segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {label_pct}%\"><span class=\"seg-label\">{self.escape_html(o)} {label_pct}%</span></div>")
                 else:
-                    # 10%未満: 棒内部にラベル非表示
-                    segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {label_pct}%\"></div>")
+                    # 外側ラベル対象
+                    if label_pct >= self.outside_label_with_inner_pct_threshold:
+                        # 10%以上: 棒内部に割合のみ表示
+                        segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {label_pct}%\"><span class=\"seg-label\">{label_pct}%</span></div>")
+                    else:
+                        # 10%未満: 棒内部にラベル非表示
+                        segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {label_pct}%\"></div>")
+            else:
+                # ラベルを一切表示しない（内外ともに）
+                segs.append(f"<div class=\"seg\" style=\"{style}\" title=\"{self.escape_html(o)} {label_pct}%\"></div>")
             
             left += w
         
         s_text = f"{S:,}{unit}"
         
         # 7. 最終HTML構造
-        if outside_labels:
+        if show_labels and outside_labels:
             right_html = f'<div class="bar-right">{s_text}</div>' if show_total_right else ''
             return f"""<div class="bar-container">
   <div class="bar-content">
@@ -821,7 +825,7 @@ class HTMLComponents:
         for name, fr in frames:
             counts, S = aggregate_group(fr, qcol, order)
             if S > 0:
-                bars.append(f"<div><div class=\"q-subheading\">{self.escape_html(name)}</div>{self.render_stacked_bar(name, counts, order, colors, unit)}</div>")
+                bars.append(f"<div><div class=\"q-subheading\">{self.escape_html(name)}</div>{self.render_stacked_bar(name, counts, order, colors, unit, show_total_right=True, show_labels=False)}</div>")
         if not bars:
             return f"<div class=\"q-subheading\">{self.escape_html(group_label)}</div><div class=\"muted\">データなし</div>"
         # group_label as a heading, then stacked bars listed vertically
@@ -832,10 +836,11 @@ class HTMLComponents:
             counts, S = aggregate_group(fr, qcol, order)
             if S == 0:
                 continue
-            bar_html = self.render_stacked_bar(name, counts, order, colors, unit, show_total_right=False)
+            bar_html = self.render_stacked_bar(name, counts, order, colors, unit, show_total_right=False, show_labels=False)
             label_text = f"{self.escape_html(name)} = {S:,}{suffix}"
             inner.append(f"<div><div class=\"muted\" style=\"margin-bottom:0.3mm;\">{label_text}</div>{bar_html}</div>")
-        return f"<div class=\"q-subheading\">{self.escape_html(group_label)}</div>" + "".join(inner)
+        legend_html = self.render_legend(order, colors)
+        return f"<div class=\"q-subheading\">{self.escape_html(group_label)}</div>" + legend_html + "".join(inner)
 
     def render_legend(self, order: list[str], colors: dict) -> str:
         """伝説（凡例）"""
@@ -1009,7 +1014,7 @@ class QuestionComponent(HTMLComponents):
         if S_overall > 0:
             overall_suffix = "回" if unit.endswith("回中") else "人"
             overall_label = f"全体 = {S_overall:,}{overall_suffix}"
-            overall_bar_html = f"<div><div class=\"muted\" style=\"margin-bottom:0.3mm;\">{overall_label}</div>{self.render_stacked_bar('全体', overall_counts, order, colors, unit, show_total_right=False)}</div>"
+            overall_bar_html = f"<div><div class=\"muted\" style=\"margin-bottom:0.3mm;\">{overall_label}</div>{self.render_stacked_bar('全体', overall_counts, order, colors, unit, show_total_right=False, show_labels=False)}</div>"
         else:
             overall_bar_html = "<div><div class=\"muted\">データなし</div></div>"
         
@@ -1031,9 +1036,9 @@ class QuestionComponent(HTMLComponents):
         {grade_pct_table_html}
         {region_table_html}
         {grade_table_html}
-        {legend_html}
         {explain_html}
         <div class=\"q-subheading\">全体</div>
+        {legend_html}
         {overall_bar_html}
         {region_html}
         {grade_html}
