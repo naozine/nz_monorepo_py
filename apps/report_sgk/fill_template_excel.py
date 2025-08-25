@@ -154,7 +154,55 @@ def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "sur
             if qcol not in df.columns:
                 raise RuntimeError(f"指定の設問列が見つかりません: {qcol}")
 
-            # セルから選択肢集合を得る関数（改行区切りにも対応）
+            # 効率的な選択肢カウント関数（パンダスベクトル化）
+            def efficient_choice_counting(df_subset, qcol: str, choice: str, class_col: str, class_order: list) -> List[int]:
+                """
+                高速なベクトル化処理で選択肢をカウント
+                部分一致にも対応
+                """
+                def contains_choice(cell_value):
+                    if cell_value is None:
+                        return False
+                    try:
+                        import pandas as _pd
+                        if _pd.isna(cell_value):
+                            return False
+                    except:
+                        pass
+                    
+                    # セル値を選択肢に分解して部分一致チェック
+                    cell_str = str(cell_value).strip()
+                    if not cell_str:
+                        return False
+                    
+                    import re as _re
+                    parts = _re.split(r"[\r\n]+", cell_str)
+                    choices_in_cell = [p.strip() for p in parts if p.strip()]
+                    
+                    # 完全一致を優先、次に部分一致
+                    for actual_choice in choices_in_cell:
+                        if choice == actual_choice:  # 完全一致
+                            return True
+                        elif choice in actual_choice:  # 部分一致
+                            return True
+                    
+                    return False
+                
+                # より効率的: copyを避けてSeriesで処理
+                choice_mask = df_subset[qcol].apply(contains_choice)
+                
+                # マスクを使って該当行のみを集計
+                valid_rows = df_subset[choice_mask]
+                
+                if len(valid_rows) == 0:
+                    return [0] * len(class_order)
+                
+                # グループ化して一括集計
+                result = valid_rows.groupby(class_col).size().reindex(class_order, fill_value=0)
+                
+                return [int(x) for x in result.tolist()]
+
+            # セルから選択肢集合を得る関数（改行区切りにも対応）- 後方互換用
             def cell_to_set(val) -> set:
                 if val is None:
                     return set()
@@ -171,33 +219,17 @@ def get_survey_data_series(series_type: str, excel_path: Union[str, Path] = "sur
                 parts = _re.split(r"[\r\n]+", s)
                 return {p.strip() for p in parts if p.strip()}
 
-            # 集計
+            # 高速集計（ベクトル化処理）
             if class_type == "grade":
                 order = ["小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "中3"]
                 if "grade_2024" not in df.columns:
                     raise RuntimeError("必要な列 'grade_2024' が見つかりません。")
-                counts: List[int] = []
-                for g in order:
-                    sub = df[df["grade_2024"] == g]
-                    n = 0
-                    for v in sub[qcol].dropna():
-                        if choice in cell_to_set(v):
-                            n += 1
-                    counts.append(int(n))
-                return counts
+                return efficient_choice_counting(df, qcol, choice, "grade_2024", order)
             else:
                 order = ["東京23区", "三多摩島しょ", "埼玉県", "神奈川県", "千葉県", "その他"]
                 if "region_bucket" not in df.columns:
                     raise RuntimeError("必要な列 'region_bucket' が見つかりません。")
-                counts: List[int] = []
-                for r in order:
-                    sub = df[df["region_bucket"] == r]
-                    n = 0
-                    for v in sub[qcol].dropna():
-                        if choice in cell_to_set(v):
-                            n += 1
-                    counts.append(int(n))
-                return counts
+                return efficient_choice_counting(df, qcol, choice, "region_bucket", order)
 
         # 地域シリーズ（region_grades:...）の特別処理
         if series_type.startswith("region_grades"):
