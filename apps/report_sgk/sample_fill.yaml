@@ -1,0 +1,10 @@
+template: report_template.xlsx
+output: report_result_from_yaml.xlsx
+writes:
+  - sheet: p1
+    cell: AC14
+    value: YYY
+  - sheet: p1
+    row: 15
+    column: AD
+    value: ZZZ
