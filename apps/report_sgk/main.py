@@ -92,6 +92,9 @@ def aggregate_ranking_questions(frame: pd.DataFrame) -> pd.DataFrame:
     if len(existing_cols) < 2:
         return frame
     
+    # 元の最初のランキング質問の位置を記録
+    first_ranking_pos = frame.columns.get_loc(existing_cols[0])
+    
     # 新しい統合列の名前
     aggregated_col = "各校のブースで知りたい内容を順に３つまで選んでください"
     
@@ -104,12 +107,15 @@ def aggregate_ranking_questions(frame: pd.DataFrame) -> pd.DataFrame:
                 values.append(str(val).strip())
         return "\n".join(values) if values else np.nan
     
-    # 新しい列を作成
+    # 新しい列を作成（データ処理）
     frame = frame.copy()
-    frame[aggregated_col] = frame.apply(combine_rankings, axis=1)
+    aggregated_series = frame.apply(combine_rankings, axis=1)
     
     # 元の列を削除
     frame = frame.drop(columns=existing_cols)
+    
+    # 統合列を元の最初の位置に挿入
+    frame.insert(first_ranking_pos, aggregated_col, aggregated_series)
     
     return frame
 
@@ -1382,6 +1388,9 @@ class ReportDataPreparator:
         if len(existing_cols) < 2:
             return frame
         
+        # 元の最初のランキング質問の位置を記録
+        first_ranking_pos = frame.columns.get_loc(existing_cols[0])
+        
         # 新しい統合列の名前
         aggregated_col = "各校のブースで知りたい内容を順に３つまで選んでください"
         
@@ -1394,12 +1403,15 @@ class ReportDataPreparator:
                     values.append(str(val).strip())
             return "\n".join(values) if values else np.nan
         
-        # 新しい列を作成
+        # 新しい列を作成（データ処理）
         frame = frame.copy()
-        frame[aggregated_col] = frame.apply(combine_rankings, axis=1)
+        aggregated_series = frame.apply(combine_rankings, axis=1)
         
         # 元の列を削除
         frame = frame.drop(columns=existing_cols)
+        
+        # 統合列を元の最初の位置に挿入
+        frame.insert(first_ranking_pos, aggregated_col, aggregated_series)
         
         return frame
     
