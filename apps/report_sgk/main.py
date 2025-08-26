@@ -244,7 +244,7 @@ channel_by_grade = (
 # - 入力DataFrame中の列順を維持して返す
 
 def get_question_columns(frame: pd.DataFrame) -> list:
-    excluded_exact = {"性別", "生年月日", "郵便番号", "都道府県", "市区町村"}
+    excluded_exact = {"性別", "生年月日", "郵便番号", "都道府県", "市区町村", "詳細タイトル名", "申込人数（受験生）", "申込人数（保護者等）"}
 
     def is_ascii_identifier(name: str) -> bool:
         # 先頭は英字またはアンダースコア、以降は英数字またはアンダースコアのみ
