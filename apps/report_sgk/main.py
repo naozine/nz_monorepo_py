@@ -46,7 +46,8 @@ def _load_env_from_dotenv():
 _load_env_from_dotenv()
 
 # 1) 読み込み
-df = pd.read_excel(Path(__file__).parent / "survey.xlsx", engine="openpyxl")
+survey_file = os.getenv("SURVEY_EXCEL_FILE", "survey.xlsx")
+df = pd.read_excel(Path(__file__).parent / survey_file, engine="openpyxl")
 
 # 2) 「回答」列の例外的な処理（仕様変更後）
 # 仕様：
@@ -1732,7 +1733,8 @@ def main():
         
         # レポートジェネレーターを作成して実行
         generator = ReportGenerator(report_config, component_config)
-        excel_path = Path(__file__).parent / "survey.xlsx"
+        survey_file = os.getenv("SURVEY_EXCEL_FILE", "survey.xlsx")
+        excel_path = Path(__file__).parent / survey_file
         
         if not excel_path.exists():
             print(f"エラー: ファイルが見つかりません: {excel_path}")
