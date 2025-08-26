@@ -142,7 +142,7 @@ def parse_birth(x):
 df["birth_dt"] = df["生年月日"].apply(parse_birth)
 
 # 5) 2024年度の「4/1時点学年」を算出
-FISCAL_YEAR = 2024
+FISCAL_YEAR = int(os.getenv("FISCAL_YEAR", "2024"))
 APRIL1 = pd.Timestamp(f"{FISCAL_YEAR}-04-01")
 
 def age_on(d, ref):
@@ -1217,7 +1217,7 @@ class ReportConfig:
     participating_schools: str = "参加校 100校"
     venue: str = "サンプル会場 A"
     event_dates: str = "9月1日（日）"
-    fiscal_year: int = 2024
+    fiscal_year: int = field(default_factory=lambda: int(os.getenv("FISCAL_YEAR", "2024")))
     
     @classmethod
     def from_env(cls) -> 'ReportConfig':
