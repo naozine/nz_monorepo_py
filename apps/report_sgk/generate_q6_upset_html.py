@@ -105,26 +105,27 @@ def _build_upset_html(memberships: List[Set[str]], options: List[str]) -> str:
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
   <title>Q6 アップセット図</title>
   <style>
-    :root { --bar-color: #4e79a7; --bar2-color: #f28e2b; --dot: #333; --line: #999; }
+    :root { --bar-color: #4e79a7; --bar2-color: #f28e2b; --dot: #333; --line: #999; --col-width: 36px; --col-gap: 12px; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif; color: #222; padding: 16px; }
     h1 { font-size: 20px; margin: 0 0 12px; }
     .controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin: 10px 0 14px; font-size: 13px; }
     .chart-wrap { display: grid; grid-template-columns: 220px 1fr; grid-template-rows: auto auto; gap: 8px 12px; align-items: end; }
     .set-bars-title { grid-column: 2; font-size: 12px; color: #666; }
-    .set-bars { grid-column: 2; display: flex; align-items: flex-end; gap: 12px; height: 140px; border-bottom: 1px solid #eee; }
-    .set-bar { width: 36px; background: var(--bar2-color); display: flex; align-items: flex-end; justify-content: center; position: relative; }
+    .set-bars { grid-column: 2; display: grid; align-items: end; grid-template-columns: repeat(var(--ncols), var(--col-width)); column-gap: var(--col-gap); height: 140px; border-bottom: 1px solid #eee; }
+    .set-bar { width: var(--col-width); background: var(--bar2-color); display: flex; align-items: flex-end; justify-content: center; position: relative; }
     .set-bar .value { position: absolute; bottom: 100%; transform: translateY(-4px); font-size: 11px; color: #444; }
-    .set-labels { grid-column: 2; display: flex; gap: 12px; }
-    .set-label { width: 36px; writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; font-size: 12px; color: #333; }
+    .set-labels { grid-column: 2; display: grid; grid-template-columns: repeat(var(--ncols), var(--col-width)); column-gap: var(--col-gap); }
+    .set-label { width: var(--col-width); writing-mode: vertical-rl; transform: rotate(180deg); text-align: left; font-size: 12px; color: #333; }
 
     .matrix { grid-column: 2; }
-    .matrix-row { display: grid; grid-template-columns: repeat(var(--ncols), 28px); gap: 12px; align-items: center; margin: 6px 0; }
+    .matrix-row { display: grid; grid-template-columns: repeat(var(--ncols), var(--col-width)); column-gap: var(--col-gap); align-items: center; margin: 6px 0; }
     .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--dot); margin: 0 auto; position: relative; }
     .line { height: 2px; background: var(--line); position: relative; top: -6px; grid-column: var(--line-start) / var(--line-end); }
 
     .combo-area { grid-column: 1 / span 2; display: grid; grid-template-columns: 220px 1fr; column-gap: 12px; }
     .combo-left { border-right: 1px solid #eee; padding-right: 8px; }
-    .combo-bar { height: 16px; background: var(--bar-color); margin: 8px 0; position: relative; }
+    .combo-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+    .combo-bar { height: 10px; background: var(--bar-color); margin: 0; position: relative; flex: 0 0 auto; }
     .combo-bar .value { position: absolute; left: 100%; margin-left: 6px; top: 50%; transform: translateY(-50%); font-size: 12px; color: #444; }
     .combo-label { font-size: 12px; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .muted { color: #777; }
@@ -180,6 +181,8 @@ def _build_upset_html(memberships: List[Set[str]], options: List[str]) -> str:
       // Top set size bars
       const wrap = document.createElement('div');
       wrap.className = 'chart-wrap';
+      // share ncols to align columns across top bars, labels, and matrix
+      wrap.style.setProperty('--ncols', String(colOrder.length));
 
       const setBarsTitle = document.createElement('div');
       setBarsTitle.className = 'set-bars-title';
@@ -217,17 +220,20 @@ def _build_upset_html(memberships: List[Set[str]], options: List[str]) -> str:
       left.className = 'combo-left';
       const maxCombo = Math.max(1, computeMax(combosFiltered, 'count'));
       for (const c of combosFiltered) {
+        const rowL = document.createElement('div');
+        rowL.className = 'combo-row';
         const lbl = document.createElement('div');
         lbl.className = 'combo-label muted';
         lbl.title = c.sets.join(' ∩ ');
         lbl.textContent = c.sets.join(' ∩ ');
-        left.appendChild(lbl);
+        rowL.appendChild(lbl);
         const bar = document.createElement('div');
         bar.className = 'combo-bar';
         bar.style.width = (Math.round((c.count / maxCombo) * 100)) + '%';
         const v = document.createElement('div'); v.className = 'value'; v.textContent = c.count;
         bar.appendChild(v);
-        left.appendChild(bar);
+        rowL.appendChild(bar);
+        left.appendChild(rowL);
       }
       comboArea.appendChild(left);
 
