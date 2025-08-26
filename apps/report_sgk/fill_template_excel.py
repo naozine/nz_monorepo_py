@@ -61,6 +61,7 @@ def get_survey_data_value(survey_data_type: str, processed_data: 'ProcessedData'
         - "total_responses": 総回答者数
         - "invalid_responses": 無効回答者数（未就学児等）
         - "effective_responses": 有効回答者数
+        - "pick_count:q=<番号>;count=<回数>": 指定設問で指定回数の選択肢を選んだ人数
     :param processed_data: 事前に処理済みのデータ（パフォーマンス最適化用）
     :param excel_path: アンケートExcelファイルのパス（processed_data未指定時のみ使用）
     :return: 対応する値
@@ -81,6 +82,61 @@ def get_survey_data_value(survey_data_type: str, processed_data: 'ProcessedData'
             return processed_data.n_preschool
         elif survey_data_type == "effective_responses":
             return processed_data.n_total
+        elif survey_data_type.startswith("pick_count"):
+            # 記法: "pick_count:q=<番号>;count=<回数>"
+            params_str = ""
+            parts = survey_data_type.split(":", 1)
+            if len(parts) == 2:
+                params_str = parts[1]
+            # セミコロン区切りの key=value
+            params: Dict[str, str] = {}
+            if params_str:
+                for token in params_str.split(";"):
+                    if "=" in token:
+                        k, v = token.split("=", 1)
+                        params[k.strip().lower()] = v.strip()
+            # 必須の2要素
+            q_str = params.get("q") or params.get("question")
+            count_str = params.get("count")
+            if not q_str or not count_str:
+                raise ValueError("pick_count には q(またはquestion) / count を指定してください。例: pick_count:q=6;count=2")
+            try:
+                q_idx = int(q_str)
+                target_count = int(count_str)
+            except Exception:
+                raise ValueError(f"pick_count の q と count は整数で指定してください（q: {q_str}, count: {count_str}）")
+            
+            # 設問列名の解決（1開始）
+            questions = processed_data.question_columns
+            if q_idx < 1 or q_idx > len(questions):
+                raise IndexError(f"pick_count: question 番号が範囲外です（1〜{len(questions)}）。指定: {q_idx}")
+            qcol = questions[q_idx - 1]
+            if qcol not in processed_data.df_effective.columns:
+                raise RuntimeError(f"指定の設問列が見つかりません: {qcol}")
+            
+            # 各回答者の選択肢数をカウント
+            df = processed_data.df_effective
+            def count_choices_in_cell(cell_value) -> int:
+                if cell_value is None:
+                    return 0
+                try:
+                    import pandas as _pd
+                    if _pd.isna(cell_value):
+                        return 0
+                except:
+                    pass
+                cell_str = str(cell_value).strip()
+                if not cell_str:
+                    return 0
+                # 改行区切りで分割
+                import re as _re
+                parts = _re.split(r"[\r\n]+", cell_str)
+                choices = [p.strip() for p in parts if p.strip()]
+                return len(choices)
+            
+            # 指定回数の選択肢を選んだ人数をカウント
+            choice_counts = df[qcol].apply(count_choices_in_cell)
+            return int((choice_counts == target_count).sum())
         else:
             raise ValueError(f"不明な survey_data_type: {survey_data_type}")
             
@@ -468,7 +524,7 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
     # パフォーマンス最適化: データ処理を最初に1回だけ実行
     processed_data = None
     needs_survey_data = any(
-        w.get("survey_data") is not None or w.get("survey_series") is not None
+        w.get("survey_data") is not None or w.get("survey_series") is not None or w.get("survey_pick_count") is not None
         for w in writes
     )
     if needs_survey_data and ReportDataPreparator is not None:
@@ -512,10 +568,13 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
         value = w.get("value")
         survey_data_type = w.get("survey_data")
 
-        # 相互排他
-        specified = [x is not None for x in (value, survey_data_type, series_type)]
+        # survey_pick_count の処理
+        pick_count = w.get("survey_pick_count")
+        
+        # 相互排他（survey_pick_count を追加）
+        specified = [x is not None for x in (value, survey_data_type, series_type, pick_count)]
         if sum(specified) != 1:
-            raise ValueError(f"writes[{i}] では 'value' / 'survey_data' / 'survey_series' のいずれか1つだけを指定してください。")
+            raise ValueError(f"writes[{i}] では 'value' / 'survey_data' / 'survey_series' / 'survey_pick_count' のいずれか1つだけを指定してください。")
 
         ws = wb[sheet]
 
@@ -621,6 +680,23 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                         col_letter = num_to_col(base_col_num + idx)
                         target = f"{col_letter}{base_row}"
                         write_with_cream(ws, target, v)
+        elif pick_count is not None:
+            # survey_pick_count の処理
+            q = w.get("question")
+            if q is None:
+                raise ValueError(f"writes[{i}] の survey_pick_count には question を指定してください。")
+            try:
+                q_int = int(q)
+                count_int = int(pick_count)
+            except Exception:
+                raise ValueError(f"writes[{i}] の question と survey_pick_count は整数で指定してください（question: {q}, survey_pick_count: {pick_count}）。")
+            
+            pick_count_str = f"pick_count:q={q_int};count={count_int}"
+            try:
+                final_value = get_survey_data_value(pick_count_str, processed_data, survey_path)
+            except Exception as e:
+                raise RuntimeError(f"writes[{i}] の survey_pick_count の取得に失敗: {e}")
+            write_with_cream(ws, addr, final_value)
         else:
             # 単一セル書き込み
             if value is not None:
