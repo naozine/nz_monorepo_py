@@ -144,7 +144,7 @@ def get_survey_data_value(survey_data_type: str, processed_data: 'ProcessedData'
         raise RuntimeError(f"集計データの取得に失敗しました: {e}")
 
 
-def get_survey_data_series(series_type: str, processed_data: 'ProcessedData' = None, excel_path: Union[str, Path] = "survey.xlsx", choice_mapping = None, yaml_choices: list = None) -> List[int]:
+def get_survey_data_series(series_type: str, processed_data: 'ProcessedData' = None, excel_path: Union[str, Path] = "survey.xlsx", choice_mapping = None, yaml_choices: list = None) -> List[Union[int, float]]:
     """
     指定のシリーズ種別に応じて、人数配列を返します。
     
@@ -157,10 +157,12 @@ def get_survey_data_series(series_type: str, processed_data: 'ProcessedData' = N
         例: "region_grades:東京23区" / "region_grades:三多摩島しょ" / "region_grades:埼玉県" など
       - "responses:q=<番号>;choice=<選択肢>;class=<grade|region>": 指定設問の特定選択肢の回答数を、学年または地域の順で返す
         例: "responses:q=1;choice=知っている;class=grade"
+      - "ratios:q=<番号>;choices=<選択肢リスト>;class=<total|grade|region>": 指定設問の選択肢の回答割合（小数）を返す
+        例: "ratios:q=1;choices=知っている,知らない;class=total"
     
     :param processed_data: 事前に処理済みのデータ（パフォーマンス最適化用）
     :param excel_path: アンケートExcelファイルのパス（processed_data未指定時のみ使用）
-    :return: 人数リスト（series_typeに応じた順序）
+    :return: 人数リスト（responses）または割合リスト（ratios）（series_typeに応じた順序）
     """
     if ReportDataPreparator is None:
         raise RuntimeError("main.py からのインポートが失敗しているため、survey_series 機能は利用できません。")
@@ -329,6 +331,166 @@ def get_survey_data_series(series_type: str, processed_data: 'ProcessedData' = N
                 if "region_bucket" not in df.columns:
                     raise RuntimeError("必要な列 'region_bucket' が見つかりません。")
                 return efficient_choice_counting(df, qcol, choice, choice_mapping, "region_bucket", order, yaml_choices)
+
+        # 新機能: 設問×選択肢の回答割合シリーズ（全体・学年・地域別）
+        if series_type.startswith("ratios"):
+            # 記法: "ratios:q=<番号>;choices=<選択肢1>,<選択肢2>;class=<total|grade|region>"
+            # パーズ
+            params_str = ""
+            parts = series_type.split(":", 1)
+            if len(parts) == 2:
+                params_str = parts[1]
+            # セミコロン区切りの key=value
+            params: Dict[str, str] = {}
+            if params_str:
+                for token in params_str.split(";"):
+                    if "=" in token:
+                        k, v = token.split("=", 1)
+                        params[k.strip().lower()] = v.strip()
+            
+            # 必須の3要素
+            q_str = params.get("q") or params.get("question")
+            choices_str = params.get("choices")
+            class_type = params.get("class")
+            if not q_str or not choices_str or not class_type:
+                raise ValueError("ratios シリーズには q(またはquestion) / choices / class を指定してください。例: ratios:q=1;choices=知っている,知らない;class=total")
+            
+            try:
+                q_idx = int(q_str)
+            except Exception:
+                raise ValueError(f"ratios の q は整数で指定してください（指定値: {q_str}）")
+            
+            class_type = class_type.lower()
+            if class_type not in ("total", "grade", "region"):
+                raise ValueError("ratios の class は 'total', 'grade', または 'region' を指定してください。")
+
+            # 選択肢のパース（カンマ区切り）
+            choices = [c.strip() for c in choices_str.split(",") if c.strip()]
+            if not choices:
+                raise ValueError("ratios の choices は1つ以上の選択肢をカンマ区切りで指定してください。")
+
+            # 設問列名の解決（1開始）
+            questions = processed_data.question_columns
+            if q_idx < 1 or q_idx > len(questions):
+                raise IndexError(f"ratios: question 番号が範囲外です（1〜{len(questions)}）。指定: {q_idx}")
+            qcol = questions[q_idx - 1]
+            if qcol not in df.columns:
+                raise RuntimeError(f"指定の設問列が見つかりません: {qcol}")
+
+            # 選択肢マッピング解決関数（既存のものを再利用）
+            def resolve_choice_with_mapping(yaml_choice: str, choice_mapping, actual_choices: set, yaml_choices: list = None) -> str:
+                """
+                マッピング優先の選択肢解決
+                choice_mappingは辞書またはリスト形式に対応
+                1. choice_mappingに定義があれば、マッピング先で完全一致検索
+                2. マッピングがなければ従来の部分一致処理
+                """
+                
+                # 1. マッピング定義チェック
+                if choice_mapping:
+                    mapped_choice = None
+                    
+                    # 辞書形式のmapping
+                    if isinstance(choice_mapping, dict) and yaml_choice in choice_mapping:
+                        mapped_choice = choice_mapping[yaml_choice]
+                    
+                    # リスト形式のmapping（yaml_choicesとの順序対応）
+                    elif isinstance(choice_mapping, list) and yaml_choices:
+                        try:
+                            choice_index = yaml_choices.index(yaml_choice)
+                            if choice_index < len(choice_mapping):
+                                mapped_choice = choice_mapping[choice_index]
+                        except ValueError:
+                            pass  # yaml_choice が yaml_choices に見つからない場合
+                    
+                    if mapped_choice:
+                        if mapped_choice in actual_choices:
+                            return mapped_choice
+                        # マッピング先が見つからない場合（通常の動作 - セルごとに1つの値のみ含まれる）
+                
+                # 2. 従来の処理（完全一致 → 部分一致）
+                if yaml_choice in actual_choices:
+                    return yaml_choice
+                
+                for actual_choice in actual_choices:
+                    if yaml_choice in actual_choice:
+                        return actual_choice
+                
+                return None
+
+            # 割合計算用関数
+            def calculate_ratios_for_choices(df_subset, qcol: str, choices: List[str], choice_mapping, yaml_choices: list = None) -> List[float]:
+                """
+                指定された選択肢リストの回答割合を計算
+                """
+                total_responses = len(df_subset)
+                if total_responses == 0:
+                    return [0.0] * len(choices)
+                
+                ratios = []
+                for choice in choices:
+                    def contains_choice(cell_value):
+                        if cell_value is None:
+                            return False
+                        try:
+                            import pandas as _pd
+                            if _pd.isna(cell_value):
+                                return False
+                        except:
+                            pass
+                        
+                        # セル値を選択肢に分解
+                        cell_str = str(cell_value).strip()
+                        if not cell_str:
+                            return False
+                        
+                        import re as _re
+                        parts = _re.split(r"[\r\n]+", cell_str)
+                        choices_in_cell = [p.strip() for p in parts if p.strip()]
+                        
+                        # マッピング対応の選択肢解決
+                        matched_choice = resolve_choice_with_mapping(choice, choice_mapping, set(choices_in_cell), yaml_choices)
+                        return matched_choice is not None
+                    
+                    # 該当する回答数をカウント
+                    choice_count = df_subset[qcol].apply(contains_choice).sum()
+                    ratio = float(choice_count) / float(total_responses)
+                    ratios.append(ratio)
+                
+                return ratios
+
+            # クラス別の処理
+            if class_type == "total":
+                # 全体の割合を返す
+                return calculate_ratios_for_choices(df, qcol, choices, choice_mapping, yaml_choices)
+            
+            elif class_type == "grade":
+                # 学年別の割合を返す（各選択肢 × 各学年の二次元配列を一次元化）
+                order = ["小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "中3"]
+                if "grade_2024" not in df.columns:
+                    raise RuntimeError("必要な列 'grade_2024' が見つかりません。")
+                
+                result = []
+                for grade in order:
+                    grade_df = df[df["grade_2024"] == grade]
+                    grade_ratios = calculate_ratios_for_choices(grade_df, qcol, choices, choice_mapping, yaml_choices)
+                    result.extend(grade_ratios)
+                
+                return result
+            
+            else:  # region
+                # 地域別の割合を返す（各選択肢 × 各地域の二次元配列を一次元化）
+                order = ["東京23区", "三多摩島しょ", "埼玉県", "神奈川県", "千葉県", "その他"]
+                if "region_bucket" not in df.columns:
+                    raise RuntimeError("必要な列 'region_bucket' が見つかりません。")
+                
+                result = []
+                for region in order:
+                    region_df = df[df["region_bucket"] == region]
+                    region_ratios = calculate_ratios_for_choices(region_df, qcol, choices, choice_mapping, yaml_choices)
+                    result.extend(region_ratios)
+                
+                return result
 
         # 地域シリーズ（region_grades:...）の特別処理
         if series_type.startswith("region_grades"):
@@ -587,11 +749,12 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                 else:
                     raise ValueError(f"writes[{i}] の region_grades には 'region' キーで地域名を指定してください（例: region: 東京23区）。")
 
-            # responses の補完（question / choices / class を付与）
+            # responses / ratios の補完（question / choices / class を付与）
             # - choices（リスト）を推奨。choice（単一）は後方互換としてサポート（非推奨）。
             is_responses = isinstance(series_type, str) and series_type.strip() == "responses"
+            is_ratios = isinstance(series_type, str) and series_type.strip() == "ratios"
             choices_list = None
-            if is_responses:
+            if is_responses or is_ratios:
                 q = w.get("question")
                 cls = w.get("class")
                 # 新仕様: 複数選択肢
@@ -606,9 +769,9 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                     if ch is not None:
                         choices_list = [str(ch).strip()]
                     else:
-                        raise ValueError(f"writes[{i}] の responses には 'choices'（リスト）を指定してください。旧 'choice' は廃止予定です。")
+                        raise ValueError(f"writes[{i}] の {'responses' if is_responses else 'ratios'} には 'choices'（リスト）を指定してください。旧 'choice' は廃止予定です。")
                 if q is None or cls is None:
-                    raise ValueError(f"writes[{i}] の responses には question / class を指定してください。")
+                    raise ValueError(f"writes[{i}] の {'responses' if is_responses else 'ratios'} には question / class を指定してください。")
                 try:
                     q_int = int(q)
                 except Exception:
@@ -644,7 +807,31 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                 return res
             base_col_num = col_to_num(base_col)
 
-            if is_responses and choices_list is not None:
+            if is_ratios and choices_list is not None:
+                # ratios 機能: 複数 choices の割合を横並びで出力
+                cls = str(w.get("class")).strip()
+                choices_str = ",".join(choices_list)
+                series_str = f"ratios:q={q_int};choices={choices_str};class={cls}"
+                try:
+                    # choice_mappingを取得（YAMLから）
+                    yaml_choice_mapping = w.get("choice_mapping", {})
+                    values = get_survey_data_series(series_str, processed_data, survey_path, yaml_choice_mapping, choices_list)
+                except Exception as e:
+                    raise RuntimeError(f"writes[{i}] の ratios 取得に失敗: {e}")
+                
+                # direction に応じて配置
+                if direction == "right":
+                    # 横方向に配置（選択肢ごとに列をずらす）
+                    for idx, v in enumerate(values):
+                        col_letter = num_to_col(base_col_num + idx)
+                        target = f"{col_letter}{base_row}"
+                        write_with_cream(ws, target, v)
+                else:
+                    # 縦方向に配置
+                    for idx, v in enumerate(values):
+                        target = f"{base_col}{base_row + idx}"
+                        write_with_cream(ws, target, v)
+            elif is_responses and choices_list is not None:
                 # 新仕様: 複数 choices に対応
                 # - 各 choice のシリーズは「縦方向（down）」に書き込み
                 # - choice ごとに開始列を1つずつ右にずらす
