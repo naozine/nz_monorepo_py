@@ -144,7 +144,7 @@ def get_survey_data_value(survey_data_type: str, processed_data: 'ProcessedData'
         raise RuntimeError(f"集計データの取得に失敗しました: {e}")
 
 
-def get_survey_data_series(series_type: str, processed_data: 'ProcessedData' = None, excel_path: Union[str, Path] = "survey.xlsx", choice_mapping = None, yaml_choices: list = None) -> List[Union[int, float]]:
+def get_survey_data_series(series_type: str, processed_data: 'ProcessedData' = None, excel_path: Union[str, Path] = "survey.xlsx", choice_mapping = None, yaml_choices: list = None, select_count: int = None) -> List[Union[int, float]]:
     """
     指定のシリーズ種別に応じて、人数配列を返します。
     
@@ -208,8 +208,8 @@ def get_survey_data_series(series_type: str, processed_data: 'ProcessedData' = N
             except Exception:
                 raise ValueError(f"responses の q は整数で指定してください（指定値: {q_str}）")
             class_type = class_type.lower()
-            if class_type not in ("grade", "region"):
-                raise ValueError("responses の class は 'grade' または 'region' を指定してください。")
+            if class_type not in ("grade", "region", "total"):
+                raise ValueError("responses の class は 'grade', 'region', または 'total' を指定してください。")
 
             # 設問列名の解決（1開始）
             questions = processed_data.question_columns
@@ -261,10 +261,11 @@ def get_survey_data_series(series_type: str, processed_data: 'ProcessedData' = N
                 return None
 
             # 効率的な選択肢カウント関数（パンダスベクトル化）
-            def efficient_choice_counting(df_subset, qcol: str, choice: str, choice_mapping, class_col: str, class_order: list, yaml_choices: list = None) -> List[int]:
+            def efficient_choice_counting(df_subset, qcol: str, choice: str, choice_mapping, class_col: str, class_order: list, yaml_choices: list = None, select_count: int = None) -> List[int]:
                 """
                 高速なベクトル化処理で選択肢をカウント
                 部分一致にも対応
+                select_count が指定された場合、その選択数の回答者のみを対象とする
                 """
                 def contains_choice(cell_value):
                     if cell_value is None:
@@ -288,6 +289,29 @@ def get_survey_data_series(series_type: str, processed_data: 'ProcessedData' = N
                     # マッピング対応の選択肢解決
                     matched_choice = resolve_choice_with_mapping(choice, choice_mapping, set(choices_in_cell), yaml_choices)
                     return matched_choice is not None
+                
+                # select_count によるフィルタリング
+                if select_count is not None:
+                    def count_choices_in_cell(cell_value) -> int:
+                        if cell_value is None:
+                            return 0
+                        try:
+                            import pandas as _pd
+                            if _pd.isna(cell_value):
+                                return 0
+                        except:
+                            pass
+                        cell_str = str(cell_value).strip()
+                        if not cell_str:
+                            return 0
+                        import re as _re
+                        parts = _re.split(r"[\r\n]+", cell_str)
+                        choices = [p.strip() for p in parts if p.strip()]
+                        return len(choices)
+                    
+                    # 指定された選択数の回答者のみをフィルタリング
+                    choice_counts = df_subset[qcol].apply(count_choices_in_cell)
+                    df_subset = df_subset[choice_counts == select_count]
                 
                 # より効率的: copyを避けてSeriesで処理
                 choice_mask = df_subset[qcol].apply(contains_choice)
@@ -325,12 +349,65 @@ def get_survey_data_series(series_type: str, processed_data: 'ProcessedData' = N
                 order = ["小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "中3"]
                 if "grade_2024" not in df.columns:
                     raise RuntimeError("必要な列 'grade_2024' が見つかりません。")
-                return efficient_choice_counting(df, qcol, choice, choice_mapping, "grade_2024", order, yaml_choices)
-            else:
+                return efficient_choice_counting(df, qcol, choice, choice_mapping, "grade_2024", order, yaml_choices, select_count)
+            elif class_type == "region":
                 order = ["東京23区", "三多摩島しょ", "埼玉県", "神奈川県", "千葉県", "その他"]
                 if "region_bucket" not in df.columns:
                     raise RuntimeError("必要な列 'region_bucket' が見つかりません。")
-                return efficient_choice_counting(df, qcol, choice, choice_mapping, "region_bucket", order, yaml_choices)
+                return efficient_choice_counting(df, qcol, choice, choice_mapping, "region_bucket", order, yaml_choices, select_count)
+            else:  # total
+                # 全体の集計: 単一の値を返す（リスト形式で1要素）
+                def contains_choice(cell_value):
+                    if cell_value is None:
+                        return False
+                    try:
+                        import pandas as _pd
+                        if _pd.isna(cell_value):
+                            return False
+                    except:
+                        pass
+                    
+                    # セル値を選択肢に分解
+                    cell_str = str(cell_value).strip()
+                    if not cell_str:
+                        return False
+                    
+                    import re as _re
+                    parts = _re.split(r"[\r\n]+", cell_str)
+                    choices_in_cell = [p.strip() for p in parts if p.strip()]
+                    
+                    # マッピング対応の選択肢解決
+                    matched_choice = resolve_choice_with_mapping(choice, choice_mapping, set(choices_in_cell), yaml_choices)
+                    return matched_choice is not None
+                
+                # select_count によるフィルタリング
+                df_filtered = df
+                if select_count is not None:
+                    def count_choices_in_cell(cell_value) -> int:
+                        if cell_value is None:
+                            return 0
+                        try:
+                            import pandas as _pd
+                            if _pd.isna(cell_value):
+                                return 0
+                        except:
+                            pass
+                        cell_str = str(cell_value).strip()
+                        if not cell_str:
+                            return 0
+                        import re as _re
+                        parts = _re.split(r"[\r\n]+", cell_str)
+                        choices = [p.strip() for p in parts if p.strip()]
+                        return len(choices)
+                    
+                    # 指定された選択数の回答者のみをフィルタリング
+                    choice_counts = df[qcol].apply(count_choices_in_cell)
+                    df_filtered = df[choice_counts == select_count]
+                
+                # 選択肢マッチング
+                choice_mask = df_filtered[qcol].apply(contains_choice)
+                count = int(choice_mask.sum())
+                return [count]
 
         # 新機能: 設問×選択肢の回答割合シリーズ（全体・学年・地域別）
         if series_type.startswith("ratios"):
@@ -815,7 +892,8 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                 try:
                     # choice_mappingを取得（YAMLから）
                     yaml_choice_mapping = w.get("choice_mapping", {})
-                    values = get_survey_data_series(series_str, processed_data, survey_path, yaml_choice_mapping, choices_list)
+                    yaml_select_count = w.get("select_count")
+                    values = get_survey_data_series(series_str, processed_data, survey_path, yaml_choice_mapping, choices_list, yaml_select_count)
                 except Exception as e:
                     raise RuntimeError(f"writes[{i}] の ratios 取得に失敗: {e}")
                 
@@ -841,7 +919,8 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                     try:
                         # choice_mappingを取得（YAMLから）
                         yaml_choice_mapping = w.get("choice_mapping", {})
-                        values = get_survey_data_series(series_str, processed_data, survey_path, yaml_choice_mapping, choices_list)
+                        yaml_select_count = w.get("select_count")
+                        values = get_survey_data_series(series_str, processed_data, survey_path, yaml_choice_mapping, choices_list, yaml_select_count)
                     except Exception as e:
                         raise RuntimeError(f"writes[{i}] の responses 取得に失敗（choice='{ch_text}'）: {e}")
                     # 常に縦方向に配置（仕様: 複数 choices は列方向に展開）
@@ -854,7 +933,8 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                 try:
                     # choice_mappingを取得（YAMLから）
                     yaml_choice_mapping = w.get("choice_mapping", {})
-                    values = get_survey_data_series(series_type, processed_data, survey_path, yaml_choice_mapping, choices_list)
+                    yaml_select_count = w.get("select_count")
+                    values = get_survey_data_series(series_type, processed_data, survey_path, yaml_choice_mapping, choices_list, yaml_select_count)
                 except Exception as e:
                     raise RuntimeError(f"writes[{i}] の survey_series '{series_type}' の取得に失敗: {e}")
 
