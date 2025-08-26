@@ -28,6 +28,18 @@ LEARNING_OPTIONS = [
     "通っていない",
 ]
 
+# 値のゆらぎ対策（例: 「英会話」「英会話・語学教室」などを「語学教室」に正規化）
+def _normalize_learning_choices(raw_choices: set[str]) -> set[str]:
+    norm = set()
+    # 語学系（代表ラベル: 語学教室）
+    if any(("語学" in t) or ("英会話" in t) for t in raw_choices):
+        norm.add("語学教室")
+    # 既存の選択肢と完全一致するものはそのまま追加
+    for t in raw_choices:
+        if t in LEARNING_OPTIONS:
+            norm.add(t)
+    return norm
+
 
 def _format_birthdate(val: Any) -> str:
     if pd.isna(val):
@@ -90,7 +102,8 @@ def extract_rows(df: pd.DataFrame) -> List[Dict[str, Any]]:
         if has_q6:
             val = row.get(LEARNING_Q_COL)
             try:
-                selected_set = set(cell_to_unique_set(val)) if pd.notna(val) else set()
+                raw_set = set(cell_to_unique_set(val)) if pd.notna(val) else set()
+                selected_set = _normalize_learning_choices(raw_set)
             except Exception:
                 selected_set = set()
         # Fill columns for each option
