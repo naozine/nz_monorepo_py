@@ -53,7 +53,7 @@ def fill_ac14(template_path: Union[str, Path], output_path: Union[str, Path], va
     return out
 
 
-def get_survey_data_value(survey_data_type: str, processed_data: 'ProcessedData' = None, excel_path: Union[str, Path] = "survey.xlsx") -> Any:
+def get_survey_data_value(survey_data_type: str, processed_data: 'ProcessedData' = None, excel_path: Union[str, Path] = "survey.xlsx", question: int = None, choices: list = None, choice_mapping = None, class_type: str = None) -> Any:
     """
     survey_data_type に応じて、main.py の集計データから値を取得します。
     
@@ -62,6 +62,7 @@ def get_survey_data_value(survey_data_type: str, processed_data: 'ProcessedData'
         - "invalid_responses": 無効回答者数（未就学児等）
         - "effective_responses": 有効回答者数
         - "pick_count:q=<番号>;count=<回数>": 指定設問で指定回数の選択肢を選んだ人数
+        - "multiple": 複数選択肢をすべて選択した回答者数
     :param processed_data: 事前に処理済みのデータ（パフォーマンス最適化用）
     :param excel_path: アンケートExcelファイルのパス（processed_data未指定時のみ使用）
     :return: 対応する値
@@ -137,6 +138,115 @@ def get_survey_data_value(survey_data_type: str, processed_data: 'ProcessedData'
             # 指定回数の選択肢を選んだ人数をカウント
             choice_counts = df[qcol].apply(count_choices_in_cell)
             return int((choice_counts == target_count).sum())
+        elif survey_data_type == "multiple":
+            # 複数選択肢をすべて選択した回答者数
+            if not question or not choices:
+                raise ValueError("survey_data_type 'multiple' には question と choices が必要です。")
+            
+            # 設問列名の解決（1開始）
+            questions = processed_data.question_columns
+            if question < 1 or question > len(questions):
+                raise IndexError(f"question 番号が範囲外です（1〜{len(questions)}）。指定: {question}")
+            qcol = questions[question - 1]
+            if qcol not in processed_data.df_effective.columns:
+                raise RuntimeError(f"指定の設問列が見つかりません: {qcol}")
+            
+            # 選択肢マッピング解決関数（既存ロジックを再利用）
+            def resolve_choice_with_mapping(yaml_choice: str, choice_mapping, actual_choices: set, yaml_choices: list = None) -> str:
+                # 1. マッピング定義チェック
+                if choice_mapping:
+                    mapped_choice = None
+                    
+                    # 辞書形式のmapping
+                    if isinstance(choice_mapping, dict) and yaml_choice in choice_mapping:
+                        mapped_choice = choice_mapping[yaml_choice]
+                    
+                    # リスト形式のmapping（yaml_choicesとの順序対応）
+                    elif isinstance(choice_mapping, list) and yaml_choices:
+                        try:
+                            choice_index = yaml_choices.index(yaml_choice)
+                            if choice_index < len(choice_mapping):
+                                mapped_choice = choice_mapping[choice_index]
+                        except ValueError:
+                            pass
+                    
+                    if mapped_choice:
+                        if mapped_choice in actual_choices:
+                            return mapped_choice
+                
+                # 2. 従来の処理（完全一致 → 部分一致）
+                if yaml_choice in actual_choices:
+                    return yaml_choice
+                
+                for actual_choice in actual_choices:
+                    if yaml_choice in actual_choice:
+                        return actual_choice
+                
+                return None
+            
+            # 複数選択肢の同時選択をチェック
+            def contains_all_choices(cell_value):
+                if cell_value is None:
+                    return False
+                try:
+                    import pandas as _pd
+                    if _pd.isna(cell_value):
+                        return False
+                except:
+                    pass
+                
+                # セル値を選択肢に分解
+                cell_str = str(cell_value).strip()
+                if not cell_str:
+                    return False
+                
+                import re as _re
+                parts = _re.split(r"[\r\n]+", cell_str)
+                choices_in_cell = [p.strip() for p in parts if p.strip()]
+                choices_set = set(choices_in_cell)
+                
+                # すべての指定選択肢が含まれているかチェック（早期終了最適化）
+                for required_choice in choices:
+                    matched_choice = resolve_choice_with_mapping(required_choice, choice_mapping, choices_set, choices)
+                    if matched_choice is None:
+                        return False  # 1つでも見つからなければ即座にFalse
+                
+                return True  # すべて見つかった
+            
+            # データフィルタリングとカウント
+            df = processed_data.df_effective
+            if class_type and class_type.lower() == "grade":
+                # 学年別の集計（9要素のリストを返す）
+                order = ["小1", "小2", "小3", "小4", "小5", "小6", "中1", "中2", "中3"]
+                if "grade_2024" not in df.columns:
+                    raise RuntimeError("必要な列 'grade_2024' が見つかりません。")
+                
+                result = []
+                for grade in order:
+                    grade_df = df[df["grade_2024"] == grade]
+                    mask = grade_df[qcol].apply(contains_all_choices)
+                    count = int(mask.sum())
+                    result.append(count)
+                return result
+                
+            elif class_type and class_type.lower() == "region":
+                # 地域別の集計（6要素のリストを返す）
+                order = ["東京23区", "三多摩島しょ", "埼玉県", "神奈川県", "千葉県", "その他"]
+                if "region_bucket" not in df.columns:
+                    raise RuntimeError("必要な列 'region_bucket' が見つかりません。")
+                
+                result = []
+                for region in order:
+                    region_df = df[df["region_bucket"] == region]
+                    mask = region_df[qcol].apply(contains_all_choices)
+                    count = int(mask.sum())
+                    result.append(count)
+                return result
+                
+            else:
+                # 全体の集計（単一値を返す）
+                mask = df[qcol].apply(contains_all_choices)
+                return int(mask.sum())
         else:
             raise ValueError(f"不明な survey_data_type: {survey_data_type}")
             
@@ -970,9 +1080,72 @@ def fill_from_yaml(config_path: Union[str, Path]) -> Path:
                 final_value = value
             else:
                 try:
-                    final_value = get_survey_data_value(survey_data_type, processed_data, survey_path)
+                    # survey_data: multiple の場合は追加パラメータを渡す
+                    if survey_data_type == "multiple":
+                        q = w.get("question")
+                        choices_list = w.get("choices")
+                        yaml_choice_mapping = w.get("choice_mapping")
+                        cls = w.get("class")
+                        
+                        if q is None or not choices_list:
+                            raise ValueError(f"writes[{i}] の survey_data: multiple には question と choices が必要です。")
+                        
+                        try:
+                            q_int = int(q)
+                        except Exception:
+                            raise ValueError(f"writes[{i}] の question は整数で指定してください（指定値: {q}）。")
+                        
+                        final_value = get_survey_data_value(survey_data_type, processed_data, survey_path, 
+                                                          question=q_int, choices=choices_list, 
+                                                          choice_mapping=yaml_choice_mapping, class_type=cls)
+                        
+                        # class が grade/region の場合は配列が返されるので、連続セルに書き込み
+                        if cls and cls.lower() in ("grade", "region") and isinstance(final_value, list):
+                            # アドレス分解
+                            col_letters = ''.join([c for c in addr if c.isalpha()])
+                            row_digits = ''.join([c for c in addr if c.isdigit()])
+                            if not col_letters or not row_digits:
+                                raise ValueError(f"writes[{i}] の cell アドレスが不正です: {addr}")
+                            base_col = col_letters
+                            base_row = int(row_digits)
+                            
+                            # 方向のデフォルト: down
+                            direction = (w.get("direction") or "down").lower()
+                            if direction not in ("down", "right"):
+                                raise ValueError(f"writes[{i}] の direction は 'down' または 'right' で指定してください。")
+                            
+                            # 列文字<->番号の相互変換
+                            def col_to_num(s: str) -> int:
+                                num = 0
+                                for ch in s:
+                                    num = num * 26 + (ord(ch.upper()) - ord('A') + 1)
+                                return num
+                            def num_to_col(n: int) -> str:
+                                res = ""
+                                while n > 0:
+                                    n, rem = divmod(n - 1, 26)
+                                    res = chr(ord('A') + rem) + res
+                                return res
+                            base_col_num = col_to_num(base_col)
+                            
+                            # 配列の各要素を書き込み
+                            if direction == "down":
+                                for idx, v in enumerate(final_value):
+                                    target = f"{base_col}{base_row + idx}"
+                                    write_with_cream(ws, target, v)
+                            else:  # right
+                                for idx, v in enumerate(final_value):
+                                    col_letter = num_to_col(base_col_num + idx)
+                                    target = f"{col_letter}{base_row}"
+                                    write_with_cream(ws, target, v)
+                            continue  # 単一セル書き込みはスキップ
+                        
+                    else:
+                        final_value = get_survey_data_value(survey_data_type, processed_data, survey_path)
                 except Exception as e:
                     raise RuntimeError(f"writes[{i}] の survey_data '{survey_data_type}' の取得に失敗: {e}")
+            
+            # 単一セル書き込み（配列書き込みでcontinueされた場合はここは実行されない）
             write_with_cream(ws, addr, final_value)
 
     # 出力ディレクトリが存在しない場合に備える
