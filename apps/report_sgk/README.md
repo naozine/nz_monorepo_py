@@ -98,3 +98,39 @@ OUTSIDE_LABEL_WITH_INNER_PCT_THRESHOLD = 10.0  # 外側ラベル+内側割合表
 - 地域区分: 東京23区、三多摩島しょ、埼玉県、神奈川県、千葉県、その他
 - 学年: 小1〜中3
 - 印刷時のカラー保持対応
+# report_sgk
+
+このアプリはアンケート Excel (survey.xlsx) を集計し、HTML レポートとテンプレート Excel への自動書き込みを行います。
+
+## YAML によるテンプレート Excel への書き込み
+
+apps/report_sgk/fill_template_excel.py の `fill_from_yaml` を利用して、テンプレート Excel に値を書き込めます。
+
+### 例
+
+```
+template: report_template.xlsx
+output: report_result_from_yaml.xlsx
+survey_excel: survey.xlsx
+writes:
+  - sheet: Q1
+    cell: T10
+    survey_series: responses
+    question: 1          # main.py の設問一覧順（1開始）
+    choices:
+      - 知っている       # 指定設問の選択肢（複数指定可）
+      - 知らない
+    class: grade         # grade | region
+    # 備考: 複数の choices を指定すると、各選択肢を右隣の列に順に書き込みます（各列は縦方向）。
+```
+
+- survey_series: responses
+  - 指定の設問(question)における選択肢(choices)の「回答数」を、
+    - class: grade の場合は [小1..中3] の順
+    - class: region の場合は [東京23区, 三多摩島しょ, 埼玉県, 神奈川県, 千葉県, その他] の順
+    で配列化し、セルから縦方向に順に書き込みます。choices を複数指定すると列方向（右）に選択肢ごとに展開します。choices が1つだけの場合は従来と同じ結果です。
+- 設問番号は main.py の `get_question_columns()` が返すリストの 1 始まりの番号です。
+
+既存の series も利用できます:
+- elementary_boys / elementary_girls / junior_boys / junior_girls
+- region_grades（`region:` で地域を指定、または `region_grades:東京23区` の形式）

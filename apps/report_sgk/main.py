@@ -46,7 +46,8 @@ def _load_env_from_dotenv():
 _load_env_from_dotenv()
 
 # 1) 読み込み
-df = pd.read_excel(Path(__file__).parent / "survey.xlsx", engine="openpyxl")
+survey_file = os.getenv("SURVEY_EXCEL_FILE", "survey.xlsx")
+df = pd.read_excel(Path(__file__).parent / survey_file, engine="openpyxl")
 
 # 2) 「回答」列の例外的な処理（仕様変更後）
 # 仕様：
@@ -141,7 +142,7 @@ def parse_birth(x):
 df["birth_dt"] = df["生年月日"].apply(parse_birth)
 
 # 5) 2024年度の「4/1時点学年」を算出
-FISCAL_YEAR = 2024
+FISCAL_YEAR = int(os.getenv("FISCAL_YEAR", "2024"))
 APRIL1 = pd.Timestamp(f"{FISCAL_YEAR}-04-01")
 
 def age_on(d, ref):
@@ -243,7 +244,7 @@ channel_by_grade = (
 # - 入力DataFrame中の列順を維持して返す
 
 def get_question_columns(frame: pd.DataFrame) -> list:
-    excluded_exact = {"性別", "生年月日", "郵便番号", "都道府県", "市区町村"}
+    excluded_exact = {"性別", "生年月日", "郵便番号", "都道府県", "市区町村", "詳細タイトル名", "申込人数（受験生）", "申込人数（保護者等）"}
 
     def is_ascii_identifier(name: str) -> bool:
         # 先頭は英字またはアンダースコア、以降は英数字またはアンダースコアのみ
@@ -1216,7 +1217,7 @@ class ReportConfig:
     participating_schools: str = "参加校 100校"
     venue: str = "サンプル会場 A"
     event_dates: str = "9月1日（日）"
-    fiscal_year: int = 2024
+    fiscal_year: int = field(default_factory=lambda: int(os.getenv("FISCAL_YEAR", "2024")))
     
     @classmethod
     def from_env(cls) -> 'ReportConfig':
@@ -1732,7 +1733,8 @@ def main():
         
         # レポートジェネレーターを作成して実行
         generator = ReportGenerator(report_config, component_config)
-        excel_path = Path(__file__).parent / "survey.xlsx"
+        survey_file = os.getenv("SURVEY_EXCEL_FILE", "survey.xlsx")
+        excel_path = Path(__file__).parent / survey_file
         
         if not excel_path.exists():
             print(f"エラー: ファイルが見つかりません: {excel_path}")
