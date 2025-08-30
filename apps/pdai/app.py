@@ -15,6 +15,28 @@ from pandas.api.types import is_numeric_dtype, is_datetime64_any_dtype, is_objec
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib import font_manager as _fm
+
+# 日本語フォント設定（環境にあるものを自動選択）
+def _setup_japanese_font():
+    try:
+        candidates = [
+            "IPAexGothic", "IPAGothic", "Noto Sans CJK JP", "Noto Sans JP",
+            "Yu Gothic", "YuGothic", "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+            "Meiryo", "TakaoGothic", "MotoyaGothic", "MS Gothic", "MS PGothic"
+        ]
+        available = {f.name for f in _fm.fontManager.ttflist}
+        for name in candidates:
+            if name in available:
+                matplotlib.rcParams["font.family"] = name
+                break
+        # マイナス記号が豆腐になるのを防ぐ
+        matplotlib.rcParams["axes.unicode_minus"] = False
+    except Exception:
+        # フォント探索に失敗してもアプリは継続
+        matplotlib.rcParams["axes.unicode_minus"] = False
+
+_setup_japanese_font()
 
 APP_TITLE = "アンケート集計アプリ"
 HISTORY_LIMIT = 5
