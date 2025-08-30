@@ -1,0 +1,6 @@
+streamlit>=1.35.0
+pandas>=2.2.2
+openpyxl>=3.1.2
+matplotlib>=3.8.4
+# 任意: LLM連携時のみ
+# openai>=1.40.0
