@@ -313,8 +313,12 @@ def plot_with_matplotlib(df: pd.DataFrame, chart_type: ChartType, x: Optional[st
 
     ax.set_xlabel(x_label or (x or ""))
     ax.set_ylabel((y_label or ("割合(%)" if percent else "値")) if chart_type != "円" else "")
+    # 凡例はラベルが存在する場合のみ表示（警告回避）
     if legend and chart_type != "円":
-        ax.legend(loc="best")
+        handles, labels = ax.get_legend_handles_labels()
+        labels = [lb for lb in labels if lb and not lb.startswith("_")]
+        if labels:
+            ax.legend(loc="best")
     fig.tight_layout()
 
     buf = io.BytesIO()
@@ -659,7 +663,7 @@ def render_chart_and_downloads(result_df: pd.DataFrame, viz: VizConfig, label_co
         dfv = sort_dataframe_for_viz(dfv, value_col, label_col, viz.sort)
 
     # 表示
-    st.dataframe(dfv, use_container_width=True, height=350)
+    st.dataframe(dfv, width="stretch", height=350)
 
     # グラフ
     png = plot_with_matplotlib(
@@ -758,7 +762,7 @@ def main():
 
     # データプレビュー
     st.subheader("データプレビュー（先頭30行）")
-    st.dataframe(df.head(DATA_PREVIEW_ROWS), use_container_width=True, height=320)
+    st.dataframe(df.head(DATA_PREVIEW_ROWS), width="stretch", height=320)
 
     # サイドバー：モード・フィルタ他
     mode, df_eff, filters, logic, excluded = sidebar_main_controls(df)
@@ -830,14 +834,14 @@ def main():
                     # ラベルは index の最初
                     label_col = melt_id[0] if melt_id else "index"
                     result_for_viz = dfm.rename(columns={melt_id[0]: label_col}) if melt_id else dfm
-                    st.dataframe(result_df, use_container_width=True, height=300)
+                    st.dataframe(result_df, width="stretch", height=300)
                     st.subheader("可視化")
                     render_chart_and_downloads(result_for_viz, viz, label_col=label_col, value_col="値", series_col="系列")
                 else:
-                    st.dataframe(result_df, use_container_width=True, height=350)
+                    st.dataframe(result_df, width="stretch", height=350)
                     st.info("列（columns）が未指定のため、テーブルのみ表示しました。")
             else:
-                st.dataframe(result_df, use_container_width=True, height=350)
+                st.dataframe(result_df, width="stretch", height=350)
                 st.info("複数の値列があるため、表のみを表示しています。")
 
         elif mode == "上位N":
@@ -903,11 +907,11 @@ def main():
                         melt_val_vars = [c for c in df_v.columns if c not in idx]
                         dfm = df_v.melt(id_vars=melt_id, value_vars=melt_val_vars, var_name="系列", value_name="値")
                         label_col = melt_id[0] if melt_id else "index"
-                        st.dataframe(result_df_local, use_container_width=True, height=300)
+                        st.dataframe(result_df_local, width="stretch", height=300)
                         st.subheader("可視化")
                         render_chart_and_downloads(dfm, viz, label_col=label_col, value_col="値", series_col="系列")
                     else:
-                        st.dataframe(result_df_local, use_container_width=True, height=350)
+                        st.dataframe(result_df_local, width="stretch", height=350)
                         st.info("列（columns）が未指定のため、テーブルのみ表示しました。")
                     result_df = result_df_local
                     run_config = rc
