@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
-from pandas.api.types import is_numeric_dtype, is_datetime64_any_dtype, is_object_dtype, is_categorical_dtype
+import pandas.api.types as ptypes
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -96,9 +96,9 @@ class RunConfig:
 # ========== ユーティリティ ==========
 
 def _to_datetime_if_possible(s: pd.Series) -> pd.Series:
-    if is_datetime64_any_dtype(s):
+    if ptypes.is_datetime64_any_dtype(s):
         return s
-    if is_object_dtype(s):
+    if ptypes.is_object_dtype(s):
         try:
             out = pd.to_datetime(s, errors="coerce")
             # 変換成功率で判断
@@ -114,7 +114,7 @@ def dtype_optimize(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, str]]:
     suggestions: Dict[str, str] = {}
     for col in df2.columns:
         s = df2[col]
-        if is_object_dtype(s):
+        if ptypes.is_object_dtype(s):
             nunique = s.nunique(dropna=True)
             ratio = nunique / max(len(s), 1)
             if ratio < 0.5:  # 適度な閾値
@@ -123,16 +123,16 @@ def dtype_optimize(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, str]]:
             else:
                 # 日付推定
                 s2 = _to_datetime_if_possible(s)
-                if is_datetime64_any_dtype(s2) and not is_datetime64_any_dtype(s):
+                if ptypes.is_datetime64_any_dtype(s2) and not ptypes.is_datetime64_any_dtype(s):
                     df2[col] = s2
                     suggestions[col] = "object→datetime(推定)"
-        elif is_numeric_dtype(s):
+        elif ptypes.is_numeric_dtype(s):
             # 数値はそのまま
             pass
-        elif not is_datetime64_any_dtype(s):
+        elif not ptypes.is_datetime64_any_dtype(s):
             # 日付推定
             s2 = _to_datetime_if_possible(s)
-            if is_datetime64_any_dtype(s2):
+            if ptypes.is_datetime64_any_dtype(s2):
                 df2[col] = s2
                 suggestions[col] = "→datetime(推定)"
     return df2, suggestions
@@ -550,10 +550,10 @@ def sidebar_main_controls(df: pd.DataFrame):
             st.write(f"条件 {i+1}")
             col = st.selectbox(f"列{i+1}", options=list(df.columns), key=f"f_col_{i}")
             # dtype推定
-            if is_numeric_dtype(df[col]):
+            if ptypes.is_numeric_dtype(df[col]):
                 dtype = "number"
                 ops = ["=", "≠", ">", "≥", "<", "≤", "in-list"]
-            elif is_datetime64_any_dtype(df[col]):
+            elif ptypes.is_datetime64_any_dtype(df[col]):
                 dtype = "date"
                 ops = ["=", "≠", ">", "≥", "<", "≤", "in-list"]
             else:
@@ -584,7 +584,7 @@ def run_simple(df: pd.DataFrame, filters: List[FilterCond], logic: LogicOp, excl
 def run_group(df: pd.DataFrame, filters: List[FilterCond], logic: LogicOp, exclude: List[str]) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     cols = [c for c in df.columns if c not in exclude]
     group_cols = st.multiselect("グループ化する列", options=cols)
-    num_candidates = [c for c in cols if is_numeric_dtype(df[c])]
+    num_candidates = [c for c in cols if ptypes.is_numeric_dtype(df[c])]
     agg_target_cols = st.multiselect("集計する数値列", options=num_candidates)
     agg_funcs: List[AggFunc] = st.multiselect("集計関数", options=["count", "sum", "mean", "median", "min", "max"], default=["count", "mean"])
     agg_map = {c: agg_funcs for c in agg_target_cols}
@@ -649,7 +649,7 @@ def render_chart_and_downloads(result_df: pd.DataFrame, viz: VizConfig, label_co
     # 可視化列推定
     if value_col is None:
         # 候補: 数値列
-        num_cols = [c for c in dfv.columns if is_numeric_dtype(dfv[c])]
+        num_cols = [c for c in dfv.columns if ptypes.is_numeric_dtype(dfv[c])]
         value_col = num_cols[0] if num_cols else (dfv.columns[1] if dfv.shape[1] >= 2 else dfv.columns[0])
     if label_col is None:
         label_col = dfv.columns[0] if dfv.shape[1] >= 1 else None
@@ -921,7 +921,7 @@ def main():
                         # 値未指定なら件数のみ
                         agg_map = {}
                         for c in fdf.columns:
-                            if is_numeric_dtype(fdf[c]):
+                            if ptypes.is_numeric_dtype(fdf[c]):
                                 agg_map[c] = ["mean"]
                         if not agg_map:
                             raise ValueError("集計対象の数値列が見つかりません。")
