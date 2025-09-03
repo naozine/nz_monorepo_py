@@ -4,6 +4,7 @@
 import io
 import json
 import re
+import unicodedata
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
@@ -91,6 +92,21 @@ class RunConfig:
     # プロンプト解釈
     prompt_raw: Optional[str] = None
     prompt_interpreted: Optional[Dict[str, Any]] = None
+    # 複数回答の縦持ち化（エクスプロード）設定
+    explode_enabled: bool = False
+    explode_columns: Optional[List[str]] = None
+    explode_separator: Optional[str] = None  # プリセットキー or 正規表現
+    explode_trim: bool = True
+    explode_compress_separators: bool = True
+    explode_drop_empty: bool = True
+    explode_unique_within_row: bool = True
+    explode_mode: Optional[Literal["single_value", "keep_source_name"]] = "single_value"
+    value_column_name: str = "選択肢"
+    source_column_name: str = "元設問"
+    respondent_id_col: Optional[str] = None
+    explode_normalize_zenhan: bool = False
+    explode_case: Optional[Literal["lower", "upper", "none"]] = "none"
+    explode_dedupe_per_respondent: bool = False
 
 # ========== ユーティリティ ==========
 
@@ -343,6 +359,141 @@ def normalize_text_variants(df: pd.DataFrame, mapping: Dict[str, str], target_co
     df[target_col] = s.replace(mapping)
     return df
 
+# ========== 複数回答エクスプロード ユーティリティ ==========
+
+def _build_separator_regex(preset_key: Optional[str], custom_regex: Optional[str]) -> str:
+    # プリセットキー: "改行", "カンマ", "セミコロン", "タブ", "中黒", "スラッシュ"
+    presets = {
+        "改行": r"\r?\n+",
+        "カンマ": r"[,、，]+",
+        "セミコロン": r"[;；]+",
+        "タブ": r"\t+",
+        "中黒": r"[・･]+",
+        "スラッシュ": r"[/／]+",
+    }
+    if custom_regex and custom_regex.strip():
+        return custom_regex
+    if preset_key in presets:
+        return presets[preset_key]
+    # デフォルトは改行 or カンマ相当
+    return r"[,、，\r?\n]+"
+
+def _normalize_token(s: str, zenhan: bool, case: Optional[str], trim: bool) -> str:
+    if s is None:
+        return ""
+    t = str(s)
+    if zenhan:
+        t = unicodedata.normalize("NFKC", t)
+    if trim:
+        t = t.strip()
+    if case == "lower":
+        t = t.lower()
+    elif case == "upper":
+        t = t.upper()
+    return t
+
+def explode_multianswer(
+    df: pd.DataFrame,
+    *,
+    columns: List[str],
+    separator_regex: str,
+    value_col: str = "選択肢",
+    source_col: Optional[str] = None,
+    respondent_id_col: Optional[str] = None,
+    trim: bool = True,
+    compress_seps: bool = True,
+    drop_empty: bool = True,
+    unique_within_row: bool = True,
+    normalize_zenhan: bool = False,
+    case: Optional[str] = "none",
+    dedupe_per_respondent: bool = False,
+) -> Tuple[pd.DataFrame, str]:
+    """
+    複数回答列を縦持ち化。返り値: (変換後DataFrame, 使用したrespondent_id列名)
+    - source_col が指定されれば列名を保持
+    - respondent_id_col が None の場合は index から自動生成
+    - 他の元列は保持して複製
+    """
+    if not columns:
+        return df, respondent_id_col or ""
+
+    df_in = df.copy()
+
+    # respondent id 準備
+    rid_col = respondent_id_col
+    if not rid_col or rid_col not in df_in.columns:
+        rid_col = "respondent_id"
+        if rid_col in df_in.columns:
+            # 衝突回避
+            base = rid_col
+            k = 1
+            while f"{base}_{k}" in df_in.columns:
+                k += 1
+            rid_col = f"{base}_{k}"
+        df_in[rid_col] = df_in.index
+
+    # 収集
+    frames: List[pd.DataFrame] = []
+    pattern = separator_regex
+
+    for col in columns:
+        if col not in df_in.columns:
+            continue
+        s = df_in[col]
+        # 非文字列も文字列化して扱う
+        s = s.astype(str)
+        # 分割→リスト
+        def split_to_list(x: str) -> List[str]:
+            text = x if x is not None else ""
+            if compress_seps:
+                # 連続区切りは正規表現側で + を使っている前提だが、customでも想定して圧縮
+                try:
+                    text = re.sub(pattern, lambda m: m.group(0)[0], text)
+                except re.error:
+                    pass
+            try:
+                parts = re.split(pattern, text)
+            except re.error:
+                parts = re.split(r"[,、，\r?\n]+", text)
+            # 正規化
+            items = [_normalize_token(p, normalize_zenhan, case, trim) for p in parts]
+            if unique_within_row:
+                seen = set()
+                uniq = []
+                for it in items:
+                    if it not in seen:
+                        seen.add(it)
+                        uniq.append(it)
+                items = uniq
+            if drop_empty:
+                items = [p for p in items if p != "" and p.lower() != "nan"]
+            return items
+
+        list_col = s.fillna("").map(split_to_list)
+        tmp = df_in.copy()
+        tmp[value_col] = list_col
+        if source_col:
+            tmp[source_col] = col
+        # explode
+        tmp = tmp.explode(value_col, ignore_index=False)
+        if drop_empty:
+            tmp = tmp[tmp[value_col].astype(str).str.len() > 0]
+        frames.append(tmp)
+
+    if not frames:
+        return df, rid_col
+
+    out = pd.concat(frames, axis=0, ignore_index=True)
+
+    # 同一回答者の同一選択肢を1回にする
+    if dedupe_per_respondent and value_col in out.columns and rid_col in out.columns:
+        keys = [rid_col, value_col]
+        if source_col:
+            keys.append(source_col)
+        out = out.drop_duplicates(subset=keys, keep="first")
+
+    return out, rid_col
+
 # ========== ルールベース・プロンプトパーサ（簡易） ==========
 
 def parse_prompt_jp(prompt: str, columns: List[str]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -536,7 +687,7 @@ def sidebar_main_controls(df: pd.DataFrame):
     mode = st.sidebar.selectbox("集計モード", ["単純集計", "グループ集計", "クロス集計（ピボット）", "上位N", "プロンプト集計"])
     st.sidebar.markdown("---")
 
-    # 不要列の除外提案
+    # 不要列の除外・型最適化
     with st.sidebar.expander("不要列の除外・型最適化", expanded=False):
         suggest_df, suggestions = dtype_optimize(df)
         to_exclude = st.multiselect("除外する列（計算から外す）", options=list(df.columns))
@@ -544,6 +695,99 @@ def sidebar_main_controls(df: pd.DataFrame):
         apply_opt = st.checkbox("型最適化を適用（カテゴリ化・日付推定）", value=bool(suggestions))
     if apply_opt:
         df = suggest_df
+
+    # 複数回答の縦持ち化（エクスプロード）
+    explode_settings: Dict[str, Any] = {
+        "explode_enabled": False,
+        "explode_columns": [],
+        "explode_separator": None,
+        "explode_trim": True,
+        "explode_compress_separators": True,
+        "explode_drop_empty": True,
+        "explode_unique_within_row": True,
+        "explode_mode": "single_value",
+        "value_column_name": "選択肢",
+        "source_column_name": "元設問",
+        "respondent_id_col": None,
+        "explode_normalize_zenhan": False,
+        "explode_case": "none",
+        "explode_dedupe_per_respondent": False,
+    }
+    with st.sidebar.expander("複数回答の縦持ち化（エクスプロード）", expanded=False):
+        enable = st.checkbox("縦持ち化を有効化", value=False)
+        explode_settings["explode_enabled"] = enable
+        if enable:
+            target_cols = st.multiselect("対象列（複数可）", options=list(df.columns))
+            preset = st.selectbox("区切り文字のプリセット", ["改行", "カンマ", "セミコロン", "タブ", "中黒", "スラッシュ"], index=0)
+            custom = st.text_input("カスタム正規表現（任意）")
+            # 前処理
+            st.caption("分割前処理オプション")
+            trim = st.checkbox("前後空白トリム", value=True)
+            compress = st.checkbox("連続区切りの圧縮（空要素除外）", value=True)
+            zenhan = st.checkbox("全角・半角の正規化（英数記号）", value=False)
+            case_mode = st.selectbox("大文字小文字の正規化", ["none", "lower", "upper"], index=0)
+            # 後処理
+            st.caption("分割後処理オプション")
+            drop_empty = st.checkbox("空文字行を除外", value=True)
+            uniq_row = st.checkbox("行内重複を除去（同一回答の重複）", value=True)
+            dedupe_resp = st.checkbox("同一回答者の同一選択肢は1回にする", value=False)
+            # 出力スキーマ
+            mode_sel = st.radio("出力スキーマ", ["単一列モード", "列名保持モード"], index=0, horizontal=True)
+            value_col_name = st.text_input("選択肢列名", value="選択肢")
+            source_col_name = st.text_input("元設問列名（列名保持モードのみ）", value="元設問")
+            # 回答者ID
+            rid_choice = st.selectbox("回答者ID列（既存の列または生成）", options=["(生成)"] + list(df.columns))
+            rid_col = None if rid_choice == "(生成)" else rid_choice
+
+            # 反映
+            explode_settings.update({
+                "explode_columns": target_cols,
+                "explode_separator": custom if custom.strip() else preset,
+                "explode_trim": trim,
+                "explode_compress_separators": compress,
+                "explode_drop_empty": drop_empty,
+                "explode_unique_within_row": uniq_row,
+                "explode_mode": ("single_value" if mode_sel == "単一列モード" else "keep_source_name"),
+                "value_column_name": value_col_name,
+                "source_column_name": source_col_name,
+                "respondent_id_col": rid_col,
+                "explode_normalize_zenhan": zenhan,
+                "explode_case": case_mode,
+                "explode_dedupe_per_respondent": dedupe_resp,
+            })
+
+            # プレビュー
+            try:
+                sep_regex = _build_separator_regex(preset, custom)
+                source_col = None if explode_settings["explode_mode"] == "single_value" else source_col_name
+                df_preview, rid_used = explode_multianswer(
+                    df,
+                    columns=target_cols,
+                    separator_regex=sep_regex,
+                    value_col=value_col_name,
+                    source_col=source_col,
+                    respondent_id_col=rid_col,
+                    trim=trim,
+                    compress_seps=compress,
+                    drop_empty=drop_empty,
+                    unique_within_row=uniq_row,
+                    normalize_zenhan=zenhan,
+                    case=case_mode,
+                    dedupe_per_respondent=dedupe_resp,
+                )
+                st.caption("プレビュー（変換後 先頭10行）")
+                st.dataframe(df_preview.head(10), use_container_width=True, height=240)
+                # サマリー: 値の上位
+                if value_col_name in df_preview.columns:
+                    vc = df_preview[value_col_name].value_counts().head(10)
+                    st.caption("分割結果のユニーク件数上位")
+                    st.write(vc.to_frame(name="件数"))
+                # 実適用
+                df = df_preview
+                # respondent id used may be new; store back
+                explode_settings["respondent_id_col"] = rid_used
+            except Exception as e:
+                st.warning(f"プレビューに失敗: {e}")
 
     # 条件絞り込み
     filters_ui: List[FilterCond] = []
@@ -571,7 +815,8 @@ def sidebar_main_controls(df: pd.DataFrame):
             else:
                 value = st.text_input(f"値{i+1}", key=f"f_val_{i}")
             filters_ui.append(FilterCond(column=col, op=op, value=value, dtype=dtype))
-    return mode, df, filters_ui, logic, to_exclude
+
+    return mode, df, filters_ui, logic, to_exclude, explode_settings
 
 def run_simple(df: pd.DataFrame, filters: List[FilterCond], logic: LogicOp, exclude: List[str]) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     cols = [c for c in df.columns if c not in exclude]
@@ -765,7 +1010,7 @@ def main():
     st.dataframe(df.head(DATA_PREVIEW_ROWS), width="stretch", height=320)
 
     # サイドバー：モード・フィルタ他
-    mode, df_eff, filters, logic, excluded = sidebar_main_controls(df)
+    mode, df_eff, filters, logic, excluded, explode_settings = sidebar_main_controls(df)
 
     # 表記ゆれ正規化支援
     with st.expander("表記ゆれ正規化（簡易マッピング）", expanded=False):
@@ -787,12 +1032,30 @@ def main():
     run_config: Optional[RunConfig] = None
     error_msg: Optional[str] = None
 
+    # エクスプロード設定をRunConfigへ受け渡すための共通kwargs
+    explode_kwargs = {
+        "explode_enabled": bool(explode_settings.get("explode_enabled")),
+        "explode_columns": explode_settings.get("explode_columns"),
+        "explode_separator": explode_settings.get("explode_separator"),
+        "explode_trim": bool(explode_settings.get("explode_trim", True)),
+        "explode_compress_separators": bool(explode_settings.get("explode_compress_separators", True)),
+        "explode_drop_empty": bool(explode_settings.get("explode_drop_empty", True)),
+        "explode_unique_within_row": bool(explode_settings.get("explode_unique_within_row", True)),
+        "explode_mode": explode_settings.get("explode_mode"),
+        "value_column_name": explode_settings.get("value_column_name", "選択肢"),
+        "source_column_name": explode_settings.get("source_column_name", "元設問"),
+        "respondent_id_col": explode_settings.get("respondent_id_col"),
+        "explode_normalize_zenhan": bool(explode_settings.get("explode_normalize_zenhan", False)),
+        "explode_case": explode_settings.get("explode_case", "none"),
+        "explode_dedupe_per_respondent": bool(explode_settings.get("explode_dedupe_per_respondent", False)),
+    }
+
     try:
         if mode == "単純集計":
             res, extra = run_simple(df_eff, filters, logic, excluded)
             result_df = res
             viz = viz_controls(default_percent=extra["normalize"])
-            run_config = RunConfig(mode="単純集計", filters=filters, logic=logic, exclude_columns=excluded, simple_col=extra["simple_col"], simple_normalize=extra["normalize"], viz=viz)
+            run_config = RunConfig(mode="単純集計", filters=filters, logic=logic, exclude_columns=excluded, simple_col=extra["simple_col"], simple_normalize=extra["normalize"], viz=viz, **explode_kwargs)
             st.subheader("結果")
             render_chart_and_downloads(result_df, viz, label_col=extra["simple_col"], value_col=("割合" if extra["normalize"] else "件数"))
 
@@ -800,7 +1063,7 @@ def main():
             res, extra = run_group(df_eff, filters, logic, excluded)
             result_df = res
             viz = viz_controls(default_percent=False)
-            run_config = RunConfig(mode="グループ集計", filters=filters, logic=logic, exclude_columns=excluded, groupby_cols=extra["groupby_cols"], agg_map=extra["agg_map"], viz=viz)
+            run_config = RunConfig(mode="グループ集計", filters=filters, logic=logic, exclude_columns=excluded, groupby_cols=extra["groupby_cols"], agg_map=extra["agg_map"], viz=viz, **explode_kwargs)
             st.subheader("結果")
             # 可視化列推定: 最初の集計列
             agg_cols = [c for c in result_df.columns if c not in (extra["groupby_cols"] or [])]
@@ -818,7 +1081,7 @@ def main():
             viz = viz_controls(default_percent=False)
             run_config = RunConfig(mode="クロス集計", filters=filters, logic=logic, exclude_columns=excluded,
                                    pivot_index=extra["pivot_index"], pivot_columns=extra["pivot_columns"],
-                                   pivot_values=extra["pivot_values"], pivot_aggfunc=extra["pivot_aggfunc"], pivot_margins=extra["pivot_margins"], viz=viz)
+                                   pivot_values=extra["pivot_values"], pivot_aggfunc=extra["pivot_aggfunc"], pivot_margins=extra["pivot_margins"], viz=viz, **explode_kwargs)
             st.subheader("結果")
             # 可視化: 値が多列になるので、indexをラベルに、columnsを系列とする想定に変換
             df_v = result_df.copy()
@@ -848,7 +1111,7 @@ def main():
             res, extra = run_topn(df_eff, filters, logic, excluded)
             result_df = res
             viz = viz_controls(default_percent=False)
-            run_config = RunConfig(mode="上位N", filters=filters, logic=logic, exclude_columns=excluded, topn_col=extra["topn_col"], topn_n=extra["topn_n"], viz=viz)
+            run_config = RunConfig(mode="上位N", filters=filters, logic=logic, exclude_columns=excluded, topn_col=extra["topn_col"], topn_n=extra["topn_n"], viz=viz, **explode_kwargs)
             st.subheader("結果")
             render_chart_and_downloads(result_df, viz, label_col=extra["topn_col"], value_col="件数")
 
@@ -881,6 +1144,9 @@ def main():
             if st.button("実行"):
                 rc = interpreted_to_runconfig(best_checked)
                 rc.prompt_raw = prompt
+                # エクスプロード設定をrcへ反映
+                for k, v in explode_kwargs.items():
+                    setattr(rc, k, v)
                 # 実行（rc.modeにより分岐）
                 fdf = apply_filters(df_eff, rc.filters, "AND")
                 if fdf.empty:
