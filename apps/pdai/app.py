@@ -3,16 +3,15 @@
 # 任意: openai（サイドバーでAPIキー設定時のみ使用）
 import io
 import json
-import math
 import re
 from dataclasses import dataclass, asdict
-from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-import pandas as pd
-import streamlit as st
-import pandas.api.types as ptypes
 import matplotlib
+import pandas as pd
+import pandas.api.types as ptypes
+import streamlit as st
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib import font_manager as _fm
