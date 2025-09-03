@@ -368,11 +368,11 @@ def parse_prompt_jp(prompt: str, columns: List[str]) -> Tuple[Optional[Dict[str,
 
     # フィルタ（簡易）: 「X=Y」「X は Y」「X in [A,B]」「Xのみ」
     filters = []
-    eqs = re.findall(r"([\w一-龠ぁ-んァ-ンー]+)\s*(?:=|が|は)\s*([^\s、，]+)", t)
+    eqs = re.findall(r"([\w一-龠ぁ-んァ-ンー]+)\s*[=がは]\s*([^\s、，]+)", t)
     for k, v in eqs:
         if k in columns:
             filters.append({"col": k, "op": "=", "val": v})
-    in_list = re.findall(r"([\w一-龠ぁ-んァ-ンー]+)\s*(?:in|IN|In)\s*\[([^\]]+)\]", t)
+    in_list = re.findall(r"([\w一-龠ぁ-んァ-ンー]+)\s*(?:in|IN|In)\s*\[([^]]+)]", t)
     for k, body in in_list:
         if k in columns:
             vals = [s.strip() for s in re.split(r"[,\s、，]+", body) if s.strip()]
@@ -386,7 +386,7 @@ def parse_prompt_jp(prompt: str, columns: List[str]) -> Tuple[Optional[Dict[str,
     # クロス/ピボット
     if "クロス" in t or "ピボット" in t or " x " in t:
         # 形: A x B / AとB / A×B
-        m_pair = re.search(r"([\w一-龠ぁ-んァ-ンー]+)\s*(?:x|×|と)\s*([\w一-龠ぁ-んァ-ンー]+)", t)
+        m_pair = re.search(r"([\w一-龠ぁ-んァ-ンー]+)\s*[x×と]\s*([\w一-龠ぁ-んァ-ンー]+)", t)
         if m_pair:
             a, b = m_pair.group(1), m_pair.group(2)
             if a in columns and b in columns:
