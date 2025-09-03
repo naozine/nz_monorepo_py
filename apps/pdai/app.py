@@ -347,7 +347,7 @@ def parse_prompt_jp(prompt: str, columns: List[str]) -> Tuple[Optional[Dict[str,
     best/candidate 例:
     {
       "mode": "pivot"|"group"|"simple"|"topn",
-      "index": [...], "columns":[...], "values":[...], "agg":"mean", "percent": True,
+      "index": [...], "columns": [...], "values": [...], "agg":"mean", "percent": True,
       "sort": "降順"|"昇順", "sort_by": "値"|"ラベル", "topn": 5,
       "filters": [{"col":"部署","op":"=","val":"営業"}]
     }
