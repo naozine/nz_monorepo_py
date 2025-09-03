@@ -103,7 +103,7 @@ def _to_datetime_if_possible(s: pd.Series) -> pd.Series:
             # 変換成功率で判断
             if out.notna().mean() > 0.7:
                 return out
-        except Exception:
+        except (TypeError, ValueError):
             pass
     return s
 
@@ -144,7 +144,7 @@ def read_excel_file(uploaded_file, sheet_name=None) -> Dict[str, pd.DataFrame]:
     for sh in targets:
         try:
             df = pd.read_excel(uploaded_file, sheet_name=sh, engine="openpyxl")
-        except Exception:
+        except (ImportError, ModuleNotFoundError, ValueError):
             df = pd.read_excel(uploaded_file, sheet_name=sh)
         data[sh] = df
     return data
@@ -178,7 +178,7 @@ def apply_filters(df: pd.DataFrame, filters: List[FilterCond], logic: LogicOp) -
                     vlist = None
                     val = pd.to_numeric([val], errors="coerce")[0]
                 s = sval
-            except Exception:
+            except (TypeError, ValueError):
                 pass
         elif f.dtype == "date":
             s = _to_datetime_if_possible(s)
