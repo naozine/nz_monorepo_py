@@ -669,7 +669,7 @@ def render_chart_and_downloads(result_df: pd.DataFrame, viz: VizConfig, label_co
     png = plot_with_matplotlib(
         dfv, viz.chart_type, x=label_col, y=value_col, series_col=series_col, percent=viz.percent, legend=viz.legend, x_label=viz.x_label, y_label=viz.y_label
     )
-    st.image(png, caption="グラフプレビュー", use_column_width=True)
+    st.image(png, caption="グラフプレビュー", use_container_width=True)
 
     # ダウンロード
     c1, c2, c3 = st.columns(3)
