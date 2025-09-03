@@ -168,6 +168,7 @@ def apply_filters(df: pd.DataFrame, filters: List[FilterCond], logic: LogicOp) -
             continue
         s = df[f.column]
         val = f.value
+        vlist = None  # ensure defined for all branches
         # 型合わせ
         if f.dtype == "number":
             try:
@@ -493,7 +494,7 @@ def interpreted_to_runconfig(interp: Dict[str, Any]) -> RunConfig:
 
 def init_session():
     if "history" not in st.session_state:
-        st.session_state["history"]: List[Dict[str, Any]] = []
+        st.session_state["history"] = []
     if "export_blob" not in st.session_state:
         st.session_state["export_blob"] = None
     if "normalized_mapping" not in st.session_state:
@@ -888,12 +889,10 @@ def main():
                         fdf = fdf.copy(); fdf["_count_"] = 1
                         res = pivot_aggregate(fdf, rc.pivot_index or [], rc.pivot_columns or [], ["_count_"], "sum", True)
                         result_df_local = res.rename(columns={"_count_": "件数"})
-                        value_col = "件数"
                     else:
                         res = pivot_aggregate(fdf, rc.pivot_index or [], rc.pivot_columns or [], rc.pivot_values or [], rc.pivot_aggfunc or "count", True)
                         result_df_local = res
-                        # 可視化用推定
-                        value_col = None
+                        # 可視化用推定（不要な一時変数を削除）
                     st.subheader("結果")
                     # 可視化は run_pivot と同様のロジック
                     df_v = result_df_local.copy()
