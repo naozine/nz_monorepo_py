@@ -311,7 +311,7 @@ def plot_with_matplotlib(df: pd.DataFrame, chart_type: ChartType, x: Optional[st
             ax.pie(df.iloc[:, 1], labels=df.iloc[:, 0].astype(str), autopct="%1.1f%%" if percent else None)
 
     ax.set_xlabel(x_label or (x or ""))
-    ax.set_ylabel((y_label or (("割合(%)" if percent else "値"))) if chart_type != "円" else "")
+    ax.set_ylabel((y_label or ("割合(%)" if percent else "値")) if chart_type != "円" else "")
     if legend and chart_type != "円":
         ax.legend(loc="best")
     fig.tight_layout()
@@ -383,7 +383,7 @@ def parse_prompt_jp(prompt: str, columns: List[str]) -> Tuple[Optional[Dict[str,
             filters.append({"col": k, "op": "≠", "val": ""})
 
     # クロス/ピボット
-    if ("クロス" in t or "ピボット" in t or " x " in t):
+    if "クロス" in t or "ピボット" in t or " x " in t:
         # 形: A x B / AとB / A×B
         m_pair = re.search(r"([\w一-龠ぁ-んァ-ンー]+)\s*(?:x|×|と)\s*([\w一-龠ぁ-んァ-ンー]+)", t)
         if m_pair:
