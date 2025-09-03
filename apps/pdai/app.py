@@ -31,7 +31,7 @@ def _setup_japanese_font():
                 break
         # マイナス記号が豆腐になるのを防ぐ
         matplotlib.rcParams["axes.unicode_minus"] = False
-    except Exception:
+    except (OSError, FileNotFoundError, RuntimeError, ValueError):
         # フォント探索に失敗してもアプリは継続
         matplotlib.rcParams["axes.unicode_minus"] = False
 
