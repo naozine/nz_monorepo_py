@@ -54,6 +54,12 @@
 
 実行例:
 ```
+# マルチシート（各種区切りシート付き）のテストデータ
 python apps/pdai/generate_explode_test_excel.py --rows 100 --seed 42 --out apps/pdai/sample_explode.xlsx
+
+# 改行のみ区切りの専用ファイルも同時に作成
+python apps/pdai/generate_explode_test_excel.py --rows 100 --seed 42 --out apps/pdai/sample_explode.xlsx \
+  --newline-only-out apps/pdai/sample_explode_newline.xlsx
 ```
 生成後、Streamlit アプリで Excel をアップロードし、サイドバーの「複数回答の縦持ち化（エクスプロード）」セクションで動作を確認してください。
+- 改行のみのテストは、`sample_explode.xlsx` 内の `survey_newline` シート、または `sample_explode_newline.xlsx` の `survey` シートをご利用ください。

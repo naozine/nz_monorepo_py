@@ -185,12 +185,36 @@ def write_excel(df: pd.DataFrame, out_path: Path):
                 rebuild(cname)
             small.to_excel(writer, index=False, sheet_name=f"survey_{key}")
 
+def write_newline_only_excel(df: pd.DataFrame, out_path: Path):
+    """Write a standalone Excel whose multi-answer columns are rebuilt to use newline-only separators."""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    df2 = df.copy()
+    target_cols = [
+        "Q1_利用チャネル（複数回答）",
+        "Q2_得意言語（複数回答）",
+        "Q3_ミックス区切り（複数回答）",
+    ]
+    for cname in target_cols:
+        if cname not in df2.columns:
+            continue
+        vals = []
+        for x in df2[cname].fillna(""):
+            if not isinstance(x, str) or x == "":
+                vals.append(x)
+                continue
+            parts = [p.strip() for p in pd.Series([x]).str.split(r"[,、，;；\t/／・･\r?\n]+").iloc[0] if p.strip()]
+            vals.append("\n".join(parts))
+        df2[cname] = vals
+    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+        df2.to_excel(writer, index=False, sheet_name="survey")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Generate Excel test data for multi-answer explode feature")
     parser.add_argument("--rows", type=int, default=50, help="Number of rows to generate (default: 50)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
     parser.add_argument("--out", type=str, default="apps/pdai/sample_explode.xlsx", help="Output .xlsx path")
+    parser.add_argument("--newline-only-out", type=str, default=None, help="Optional: Output a separate .xlsx with newline-only delimiters on main sheet")
     args = parser.parse_args()
 
     df = make_dataframe(args.rows, args.seed)
@@ -202,6 +226,14 @@ def main():
     print(" - survey")
     for key in DELIM_VARIANTS.keys():
         print(f" - survey_{key}")
+
+    # Optionally write a dedicated newline-only workbook
+    if args.newline_only_out:
+        out2 = Path(args.newline_only_out)
+        write_newline_only_excel(df, out2)
+        print(f"Wrote newline-only Excel: {out2}  (rows={len(df)})")
+        print("Sheets:")
+        print(" - survey (newline-only)")
 
 
 if __name__ == "__main__":
